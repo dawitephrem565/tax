@@ -9,6 +9,7 @@ interface ReportTaxPageProps {
   authState: string;
   setAuthState: (state: any) => void;
   onLoginSuccess: (user: any) => void;
+  onRegistrationSubmit: () => void;
   onBack: () => void;
 }
 
@@ -16,6 +17,7 @@ export default function ReportTaxPage({
   authState,
   setAuthState,
   onLoginSuccess,
+  onRegistrationSubmit,
   onBack,
 }: ReportTaxPageProps) {
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -29,6 +31,7 @@ export default function ReportTaxPage({
       <RegistrationForm
         onRegistrationSubmit={() => {
           setAuthState('pending');
+          onRegistrationSubmit();
         }}
         onSwitchToLogin={() => setIsRegisterMode(false)}
         onBack={onBack}
