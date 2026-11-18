@@ -236,14 +236,15 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     }
 
     setOcrLoading(true);
-    toast.info(`Running Tesseract OCR on ${file.name}...`);
+    toast.info(`Extracting data from ${file.name}...`);
     try {
       const formData = new FormData();
-      if (curInvoice) formData.append('invoiceFile', curInvoice);
-      if (curCash) formData.append('cashSlipFile', curCash);
+      if (curInvoice) formData.append('companyDocument', curInvoice);
+      if (curCash) formData.append('posReceipt', curCash);
       if (user?.tinNumber) formData.append('companyTin', user.tinNumber);
+      if (user?.fullName) formData.append('companyName', user.fullName);
 
-      const res = await fetch('/api/ocr', {
+      const res = await fetch('/api/ocr/extract-receipt', {
         method: 'POST',
         body: formData,
       });
@@ -251,22 +252,47 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       const json = await res.json();
       if (res.ok && json.data) {
         const d = json.data;
-        if (d.fs_number) setFsNumber(d.fs_number);
-        if (d.machine_number) setMachineNumber(d.machine_number);
-        if (d.issuer_name) setPartnerName(d.issuer_name);
-        if (d.issuer_tin) setPartnerTin(d.issuer_tin);
-        if (d.untaxed_amount) setReceiptUntaxed(d.untaxed_amount);
-        if (d.receipt_type) setReceiptType(d.receipt_type);
-        if (d.invoice_date) setReceiptDate(d.invoice_date);
+        setFsNumber(d.fs_number ?? '');
+        setMachineNumber(d.machine_number ?? '');
+        setPartnerName(d.partner_name ?? '');
+        setPartnerTin(d.partner_tin ?? '');
+        setReceiptUntaxed(d.untaxed_amount ?? null);
+        setReceiptWhtRate(d.wht_rate ?? 0);
+        if (d.receipt_date) setReceiptDate(d.receipt_date);
+        if (d.classification?.toLowerCase().includes('sale')) setReceiptType('sale');
+        else setReceiptType('purchase');
         if (json.rawText) setRawOcrText(json.rawText);
-        toast.success(`OCR Complete: FS ${d.fs_number || 'Detected'}, Total ${d.total_amount?.toLocaleString() || ''} ETB`);
+        setOcrEngine(json.engine ?? 'unknown');
+        setConfidenceNotes(d.confidence_notes ?? []);
+        const engineLabel = json.engine === 'vision-llm' ? 'Gemini Vision' : 'Tesseract Fallback';
+        toast.success(`${engineLabel}: FS ${d.fs_number || '—'}, Total ${d.total_amount?.toLocaleString() ?? '—'} ETB`);
+      } else {
+        toast.warning('Extraction returned no data. Fill fields manually.');
       }
     } catch (err) {
       console.error('OCR Error:', err);
-      toast.error('OCR extraction encountered an error. Values can be manually edited.');
+      toast.error('Extraction error. Fields can be filled manually.');
     } finally {
       setOcrLoading(false);
     }
+  };
+
+  const handleClearReceipt = () => {
+    setFsNumber('');
+    setMachineNumber('');
+    setPartnerName('');
+    setPartnerTin('');
+    setReceiptUntaxed(null);
+    setReceiptWhtRate(0);
+    setReceiptDate('');
+    setReceiptType('purchase');
+    setInvoiceFileName('');
+    setCashSlipFileName('');
+    setInvoiceFileObj(null);
+    setCashSlipFileObj(null);
+    setRawOcrText('');
+    setOcrEngine('');
+    setConfidenceNotes([]);
   };
 
   const handleRegisterReceipt = async () => {
@@ -288,7 +314,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           receipt_type: receiptType,
           partner_name: partnerName,
           partner_tin: partnerTin,
-          untaxed_amount: receiptUntaxed,
+          untaxed_amount: safeUntaxed,
           vat_15: calculatedVat,
           wht_3: calculatedWht,
           total_amount: calculatedTotal,
@@ -1066,11 +1092,10 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-3 py-2 text-xs font-medium border-b-2 whitespace-nowrap transition-colors ${
-                  active
+                className={`flex items-center gap-2 px-3 py-2 text-xs font-medium border-b-2 whitespace-nowrap transition-colors ${active
                     ? 'border-primary text-foreground font-semibold'
                     : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
+                  }`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 <span>{tab.label}</span>
@@ -1196,7 +1221,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold text-sm">Dual-Image Receipt Intake & Duplicate Detection</h3>
                   <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
-                    Odoo OCR Engine
+                    Gemini Vision + Tesseract
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
@@ -1905,12 +1930,16 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       {/* MODAL 1: DUAL-IMAGE RECEIPT INTAKE WITH OCR */}
       {/* ========================================================= */}
       <Dialog open={isReceiptModalOpen} onOpenChange={setIsReceiptModalOpen}>
-        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold">Dual-Image Receipt Intake (OCR)</DialogTitle>
             <DialogDescription className="text-xs">
-              Upload company invoice document and cash register machine receipt. Data is extracted and computed automatically.
+              Upload company invoice document and cash register machine receipt. Data is extracted via Gemini Vision LLM and computed automatically.
             </DialogDescription>
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              <span>Fields with amber borders were not extracted — verify and fill manually before registering.</span>
+            </div>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
@@ -1989,7 +2018,8 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   id="fs"
                   value={fsNumber}
                   onChange={(e) => setFsNumber(e.target.value)}
-                  className="h-9 text-xs font-mono font-semibold"
+                  placeholder="Extracted from image..."
+                  className={`h-9 text-xs font-mono font-semibold ${!fsNumber ? 'border-amber-400 focus:ring-amber-400' : ''}`}
                 />
               </div>
 
@@ -1999,7 +2029,8 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   id="machine"
                   value={machineNumber}
                   onChange={(e) => setMachineNumber(e.target.value)}
-                  className="h-9 text-xs font-mono"
+                  placeholder="Extracted from POS slip..."
+                  className={`h-9 text-xs font-mono ${!machineNumber ? 'border-amber-400 focus:ring-amber-400' : ''}`}
                 />
               </div>
 
@@ -2009,7 +2040,8 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   id="partner"
                   value={partnerName}
                   onChange={(e) => setPartnerName(e.target.value)}
-                  className="h-9 text-xs"
+                  placeholder="Extracted from image..."
+                  className={`h-9 text-xs ${!partnerName ? 'border-amber-400 focus:ring-amber-400' : ''}`}
                 />
               </div>
 
@@ -2019,7 +2051,8 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   id="tin"
                   value={partnerTin}
                   onChange={(e) => setPartnerTin(e.target.value)}
-                  className="h-9 text-xs font-mono"
+                  placeholder="10-digit TIN..."
+                  className={`h-9 text-xs font-mono ${!partnerTin ? 'border-amber-400/60' : ''}`}
                 />
               </div>
 
@@ -2028,9 +2061,10 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                 <Input
                   id="untaxed"
                   type="number"
-                  value={receiptUntaxed}
-                  onChange={(e) => setReceiptUntaxed(Number(e.target.value))}
-                  className="h-9 text-xs font-semibold"
+                  value={receiptUntaxed ?? ''}
+                  onChange={(e) => setReceiptUntaxed(e.target.value ? Number(e.target.value) : null)}
+                  placeholder="Amount before 15% VAT..."
+                  className={`h-9 text-xs font-semibold ${receiptUntaxed === null ? 'border-amber-400 focus:ring-amber-400' : ''}`}
                 />
               </div>
 
@@ -2053,7 +2087,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
             <div className="bg-muted/50 p-3 rounded-lg border border-border text-xs space-y-1.5">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Amount before VAT:</span>
-                <span>{receiptUntaxed.toLocaleString()} ETB</span>
+                <span>{safeUntaxed.toLocaleString()} ETB</span>
               </div>
               <div className="flex justify-between text-blue-600 dark:text-blue-400">
                 <span>Value Added Tax (15%):</span>
@@ -2069,7 +2103,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
               </div>
             </div>
 
-            {/* Live Tesseract OCR Raw Output */}
+            {/* Live OCR Raw Output + Confidence Notes */}
             {rawOcrText && (
               <div className="bg-muted/30 p-2.5 rounded-lg border border-border text-xs space-y-1">
                 <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
@@ -2077,22 +2111,45 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                     OCR Image Text Extracted:
                   </span>
-                  <Badge variant="outline" className="text-[10px] font-mono">Tesseract 5.4 Engine</Badge>
+                  <Badge variant="outline" className="text-[10px] font-mono">
+                    {ocrEngine === 'vision-llm' ? 'Gemini Vision LLM' : 'Tesseract 5.4 Fallback'}
+                  </Badge>
                 </div>
                 <pre className="text-[11px] font-mono whitespace-pre-wrap max-h-24 overflow-y-auto bg-background p-2 rounded border border-border text-foreground">
                   {rawOcrText}
                 </pre>
+                {confidenceNotes.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {confidenceNotes.map((note, i) => (
+                      <div key={i} className="text-[10px] text-amber-600 dark:text-amber-400 flex items-start gap-1">
+                        <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                        <span>{note}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setIsReceiptModalOpen(false)} className="text-xs h-8">
-              Cancel
+          <DialogFooter className="flex items-center justify-between gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClearReceipt}
+              className="text-xs h-8 text-muted-foreground hover:text-foreground"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1" />
+              Clear / New Receipt
             </Button>
-            <Button size="sm" onClick={handleRegisterReceipt} className="text-xs h-8 shadow-xs">
-              Confirm & Register Receipt
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setIsReceiptModalOpen(false)} className="text-xs h-8">
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleRegisterReceipt} className="text-xs h-8 shadow-xs">
+                Confirm & Register Receipt
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

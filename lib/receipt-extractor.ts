@@ -319,7 +319,7 @@ export async function extractReceiptWithVisionLLM(
 
   if (geminiApiKey) {
     try {
-      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+      const ai = new GoogleGenAI({ apiKey: geminiApiKey, apiVersion: 'v1beta' });
 
       const prompt = `
 You are a senior Ethiopian tax auditor and fiscal document specialist examining images of an Ethiopian tax invoice and/or POS cash register machine receipt (Fiscal Cash Receipt).
@@ -405,7 +405,12 @@ Return strictly a valid JSON object matching this schema:
         });
       }
 
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+      const modelsToTry = [
+        'gemini-3.1-flash-lite',
+        'gemini-3-flash-preview',
+        'gemini-3.5-flash',
+        'gemini-3.8-flash',
+      ];
       let rawJsonText = '';
 
       for (const model of modelsToTry) {
