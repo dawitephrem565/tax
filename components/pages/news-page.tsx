@@ -1,7 +1,9 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Calendar, ArrowRight } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { ArrowLeft, Calendar, ArrowRight, Newspaper } from 'lucide-react';
 
 interface NewsPageProps {
   onBack: () => void;
@@ -10,159 +12,132 @@ interface NewsPageProps {
 const newsArticles = [
   {
     id: 1,
-    title: 'New VAT Regulations Effective January 2024',
+    title: 'Ethiopian 2025 Personal Income Tax Reform In Full Effect',
     excerpt:
-      'The Ministry of Finance has announced new VAT filing requirements that will take effect on January 1, 2024.',
-    date: 'Dec 15, 2023',
-    category: 'Regulations',
+      'The Ministry of Revenues has enforced the progressive income tax brackets with basic exemption up to 2,000 ETB and revised pension rates.',
+    date: 'Aug 2025',
+    category: 'Proclamation',
   },
   {
     id: 2,
-    title: 'Tax Payment Deadline Extended for Small Businesses',
+    title: 'Dual-Image Receipt Intake & FS Verification Rules',
     excerpt:
-      'Small businesses can now submit their annual tax reports by March 31st instead of the previous deadline.',
-    date: 'Dec 10, 2023',
-    category: 'Announcements',
+      'Official guidelines on matching cash-register fiscal receipts with corporate invoices for valid 15% VAT credit claims.',
+    date: 'Sep 2025',
+    category: 'VAT Directives',
   },
   {
     id: 3,
-    title: 'Digital Tax Filing Now Available for All Categories',
+    title: 'Withholding Tax 3% Threshold for Goods Purchases',
     excerpt:
-      'The online tax filing system is now open to all business categories, making it easier to submit reports.',
-    date: 'Dec 5, 2023',
-    category: 'Updates',
+      'Clarification on withholding tax obligations: 3% on goods purchases exceeding 20,000 ETB and 2% on services over 3,000 ETB.',
+    date: 'Oct 2025',
+    category: 'Withholding',
   },
   {
     id: 4,
-    title: 'Income Tax Rate Changes for 2024',
+    title: 'Statutory Pension Rate Compliance for Private Organizations',
     excerpt:
-      'New income tax brackets have been announced for the 2024 tax year. Review the changes to understand your obligations.',
-    date: 'Nov 28, 2023',
-    category: 'Regulations',
+      'Employers must remit 7% employee contribution and 11% organization share to the Private Organizations Employees Pension Agency.',
+    date: 'Nov 2025',
+    category: 'Pension',
   },
   {
     id: 5,
-    title: 'Withholding Tax Requirements Clarified',
+    title: 'Digital Tax Clearance and Commercial License Renewals',
     excerpt:
-      'The revenue authority has released new guidelines clarifying withholding tax calculations for different income types.',
-    date: 'Nov 20, 2023',
-    category: 'Guidance',
+      'Subcity trade bureaus now verify online tax clearance certificates prior to processing annual commercial license renewals.',
+    date: 'Dec 2025',
+    category: 'Licensing',
   },
   {
     id: 6,
-    title: 'Penalty Amnesty Program Launched',
+    title: 'Z-Report Daily Reconciliation Directives',
     excerpt:
-      'Companies can now settle outstanding tax penalties at a reduced rate through the new amnesty program.',
-    date: 'Nov 15, 2023',
-    category: 'Announcements',
+      'Businesses utilizing electronic cash registers are required to archive daily Z-reports in company file boxes for periodic audit reviews.',
+    date: 'Jan 2026',
+    category: 'Compliance',
   },
 ];
 
-const categoryColors: { [key: string]: string } = {
-  Regulations: 'bg-blue-100 text-blue-800',
-  Announcements: 'bg-green-100 text-green-800',
-  Updates: 'bg-purple-100 text-purple-800',
-  Guidance: 'bg-orange-100 text-orange-800',
-};
-
 export default function NewsPage({ onBack }: NewsPageProps) {
   return (
-    <div className="min-h-screen bg-background pt-20 pb-12">
-      <div className="max-w-4xl mx-auto px-6">
+    <div className="min-h-screen bg-background text-foreground pt-20 pb-16 antialiased">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 space-y-8">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground mb-8 transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back to Home
         </button>
 
         {/* Header */}
-        <div className="mb-12">
-          <h1 className="text-4xl font-bold text-foreground mb-4">
-            Tax & Accounting News
+        <div className="space-y-1.5">
+          <Badge variant="outline" className="text-xs font-normal">
+            Ministry of Revenues & Compliance
+          </Badge>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+            Tax & Accounting Regulatory Updates
           </h1>
-          <p className="text-lg text-muted-foreground">
-            Stay informed with the latest updates and announcements from the tax
-            authority and accounting industry.
+          <p className="text-xs text-muted-foreground">
+            Official directives, proclamations, tax calendar deadlines, and compliance notices across Ethiopia.
           </p>
         </div>
 
         {/* Featured Article */}
-        <div className="bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-lg p-8 mb-12">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="bg-primary-foreground/20 px-3 py-1 rounded-full text-sm font-medium">
-              {newsArticles[0].category}
-            </span>
-          </div>
-          <h2 className="text-3xl font-bold mb-4">{newsArticles[0].title}</h2>
-          <p className="text-lg opacity-90 mb-6 text-pretty">
-            {newsArticles[0].excerpt}
-          </p>
-          <div className="flex items-center gap-4">
-            <Calendar className="w-4 h-4" />
-            <span>{newsArticles[0].date}</span>
-            <Button
-              variant="secondary"
-              className="ml-auto flex items-center gap-2"
-            >
-              Read More
-              <ArrowRight className="w-4 h-4" />
+        <Card className="border-border shadow-xs bg-muted/30">
+          <CardHeader className="p-6 pb-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <Badge variant="secondary" className="text-xs font-normal">
+                {newsArticles[0].category}
+              </Badge>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Calendar className="w-3.5 h-3.5" />
+                <span>{newsArticles[0].date}</span>
+              </div>
+            </div>
+            <CardTitle className="text-xl font-bold tracking-tight text-foreground">
+              {newsArticles[0].title}
+            </CardTitle>
+            <CardDescription className="text-xs leading-relaxed text-muted-foreground">
+              {newsArticles[0].excerpt}
+            </CardDescription>
+          </CardHeader>
+          <CardFooter className="p-6 pt-2">
+            <Button size="sm" className="text-xs h-8 gap-1.5 shadow-2xs">
+              <span>Read Proclamation Summary</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </Button>
-          </div>
-        </div>
+          </CardFooter>
+        </Card>
 
         {/* News Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {newsArticles.slice(1).map((article) => (
-            <div
-              key={article.id}
-              className="bg-card border border-border rounded-lg p-6 hover:shadow-lg transition-shadow"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <span
-                  className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                    categoryColors[article.category] ||
-                    'bg-gray-100 text-gray-800'
-                  }`}
-                >
-                  {article.category}
-                </span>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                  <Calendar className="w-4 h-4" />
-                  {article.date}
+            <Card key={article.id} className="border-border shadow-2xs hover:border-foreground/30 transition-colors flex flex-col justify-between">
+              <CardHeader className="p-5 pb-2 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="text-[10px] font-normal">
+                    {article.category}
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground font-mono">{article.date}</span>
                 </div>
-              </div>
-              <h3 className="text-lg font-semibold text-foreground mb-3 hover:text-primary transition-colors cursor-pointer">
-                {article.title}
-              </h3>
-              <p className="text-muted-foreground mb-4 text-pretty">
-                {article.excerpt}
-              </p>
-              <Button variant="outline" size="sm">
-                Read More
-              </Button>
-            </div>
+                <CardTitle className="text-sm font-semibold leading-snug">
+                  {article.title}
+                </CardTitle>
+                <CardDescription className="text-xs leading-relaxed text-muted-foreground line-clamp-3">
+                  {article.excerpt}
+                </CardDescription>
+              </CardHeader>
+              <CardFooter className="p-5 pt-0">
+                <Button variant="ghost" size="sm" className="h-7 text-xs px-0 text-foreground hover:bg-transparent hover:underline gap-1">
+                  <span>View Details</span>
+                  <ArrowRight className="w-3 h-3" />
+                </Button>
+              </CardFooter>
+            </Card>
           ))}
-        </div>
-
-        {/* Newsletter Subscription */}
-        <div className="bg-secondary border border-border rounded-lg p-8 mt-12 text-center">
-          <h3 className="text-2xl font-bold text-foreground mb-4">
-            Stay Updated
-          </h3>
-          <p className="text-muted-foreground mb-6 max-w-xl mx-auto text-pretty">
-            Subscribe to our newsletter to receive the latest tax updates and
-            accounting news directly in your inbox.
-          </p>
-          <div className="flex gap-3 max-w-md mx-auto flex-col sm:flex-row">
-            <input
-              type="email"
-              placeholder="Enter your email"
-              className="flex-1 px-4 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground"
-            />
-            <Button>Subscribe</Button>
-          </div>
         </div>
       </div>
     </div>

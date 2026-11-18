@@ -53,6 +53,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    void fetch('/api/logout', { method: 'POST' });
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setAuthState('loggedOut');

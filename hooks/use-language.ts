@@ -67,13 +67,11 @@ export const translations = {
     viewDocuments: 'View Documents',
     approve: 'Approve',
     reject: 'Reject',
-    companyName: 'Company Name',
     tinNumber: 'TIN Number',
     status: 'Status',
     action: 'Action',
     reportType: 'Report Type',
     submittedDate: 'Submitted Date',
-    vat: 'VAT',
     withhold: 'Withhold',
     businessProfitsTax: 'Business Profits Tax',
     search: 'Search',
@@ -141,13 +139,11 @@ export const translations = {
     viewDocuments: 'ሰነዶች ይመልከቱ',
     approve: 'ፈቅድ',
     reject: 'ተካ',
-    companyName: 'ኩባንያ ስም',
     tinNumber: 'ታክስ ቁጥር',
     status: 'ሁኔታ',
     action: 'ድርጊት',
     reportType: 'ሪፖርት ዓይነት',
     submittedDate: 'የገቢ ቀን',
-    vat: 'ዋጋ ተጨማሪ ግብር',
     withhold: 'ማስቆም',
     businessProfitsTax: 'ሥራ ትርፍ ታክስ',
     search: 'ፍለግ',
@@ -159,7 +155,8 @@ export const useLanguage = () => {
   const [language, setLanguage] = useState<Language>('en');
 
   const t = (key: keyof typeof translations.en): string => {
-    return translations[language][key as keyof typeof translations[language]] || key;
+    const dict = translations[language] as Record<string, string>;
+    return (dict && dict[key]) || translations.en[key] || key;
   };
 
   const toggleLanguage = () => {

@@ -1,35 +1,95 @@
 import { NextResponse } from "next/server"
-import jwt from "jsonwebtoken"
-import { connectDB } from "@/lib/db"
-import { Company } from "@/lib/models/company"
+import { requirePlatformAdmin } from "@/lib/auth"
+import { fileUrl, LEGACY_DOCUMENT_KEYS, DOCUMENT_LABELS } from "@/lib/documents"
+
+export const dynamic = "force-dynamic"
+
+type DocumentRow = {
+  document_type: string
+  storage_path: string
+  file_name: string | null
+}
+
+type CompanyRow = {
+  id: string
+  name: string
+  tin: string
+  address: string | null
+  phone: string | null
+  email: string
+  manager_phone: string | null
+  status: string
+  created_at: string
+  business_types: { name: string } | { name: string }[] | null
+  company_documents: DocumentRow[] | null
+  company_members: { count: number }[] | null
+}
 
 export async function GET(req: Request) {
-  try {
-    const authHeader = req.headers.get("authorization")
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+  const auth = await requirePlatformAdmin(req)
+  if (!auth.ok) return auth.response
 
-    const token = authHeader.split(" ")[1]
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { type: string }
-    if (decoded.type !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
+  const { searchParams } = new URL(req.url)
+  const status = searchParams.get("status")
 
-    await connectDB()
-
-    const { searchParams } = new URL(req.url)
-    const status = searchParams.get("status")
-
-    const filter = status ? { status } : {}
-    const companies = await Company.find(filter).select("-password").sort({ createdAt: -1 })
-
-    return NextResponse.json({ companies })
-  } catch (error) {
-    console.error("Get companies error:", error)
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
+  let query = auth.ctx.supabase
+    .from("companies")
+    .select(
+      "id, name, tin, address, phone, email, manager_phone, status, created_at, business_types (name), company_documents (document_type, storage_path, file_name), company_members (count)"
     )
+    .order("created_at", { ascending: false })
+
+  if (status && ["pending", "approved", "rejected", "suspended"].includes(status)) {
+    query = query.eq("status", status)
   }
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error("Get companies error:", error)
+    return NextResponse.json({ error: "Could not load companies" }, { status: 500 })
+  }
+
+  const companies = ((data ?? []) as unknown as CompanyRow[]).map((company) => {
+    const businessType = Array.isArray(company.business_types)
+      ? company.business_types[0]
+      : company.business_types
+
+    const files: Record<string, string> = {
+      license: "",
+      licenseRegistration: "",
+      vatCertificate: "",
+      tinCertificate: "",
+    }
+    const documents = (company.company_documents ?? []).map((doc) => {
+      const url = fileUrl(doc.storage_path)
+      const legacyKey = LEGACY_DOCUMENT_KEYS[doc.document_type]
+      if (legacyKey) files[legacyKey] = url
+      return {
+        type: doc.document_type,
+        label: DOCUMENT_LABELS[doc.document_type] ?? doc.document_type,
+        name: doc.file_name,
+        url,
+      }
+    })
+
+    return {
+      _id: company.id,
+      id: company.id,
+      fullName: company.name,
+      companyAddress: company.address ?? "",
+      tinNumber: company.tin,
+      phone: company.phone ?? "",
+      email: company.email,
+      managerPhone: company.manager_phone ?? "",
+      businessType: businessType?.name ?? "",
+      memberCount: company.company_members?.[0]?.count ?? 0,
+      status: company.status,
+      files,
+      documents,
+      createdAt: company.created_at,
+    }
+  })
+
+  return NextResponse.json({ companies })
 }

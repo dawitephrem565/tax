@@ -1,10 +1,10 @@
 'use client';
 
-import Image from 'next/image';
-import { Button } from '@/components/ui/button';
-import { useLanguage } from '@/hooks/use-language';
-import { Shield } from 'lucide-react';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { useLanguage } from '@/hooks/use-language';
+import { Shield, Building2, Globe, LogOut, LayoutDashboard } from 'lucide-react';
 
 interface NavbarProps {
   currentPage: string;
@@ -20,7 +20,7 @@ export default function Navbar({
   onLogout,
 }: NavbarProps) {
   const { language, t, toggleLanguage } = useLanguage();
-  
+
   const navItems = [
     { label: t('findInformation'), page: 'findInfo' },
     { label: t('reportTax'), page: 'reportTax' },
@@ -28,79 +28,99 @@ export default function Navbar({
   ];
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 shadow-sm">
-      <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Image
-            src="/logo.png"
-            alt="Amis Financial"
-            width={36}
-            height={36}
-            className="rounded-lg"
-          />
-          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-indigo-700 bg-clip-text text-transparent">
-            Amis Financial
-          </h1>
-          <div className="hidden md:flex gap-1 ml-6">
+    <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/95 backdrop-blur-sm">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+        {/* Brand */}
+        <div className="flex items-center gap-6">
+          <button
+            onClick={() => onNavigate('home')}
+            className="flex items-center gap-2.5 text-left transition-opacity hover:opacity-90"
+          >
+            <div className="h-7 w-7 rounded-md bg-primary flex items-center justify-center text-primary-foreground font-bold shadow-2xs">
+              <Building2 className="w-4 h-4" />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-sm tracking-tight text-foreground">
+                Amis Financial
+              </span>
+              <Badge variant="outline" className="text-[10px] h-4 px-1.5 font-normal tracking-wide text-muted-foreground">
+                ETHIOPIA
+              </Badge>
+            </div>
+          </button>
+
+          {/* Nav links */}
+          <nav className="hidden md:flex items-center gap-1">
             {navItems.map((item) => (
-              <button
+              <Button
                 key={item.page}
+                variant={currentPage === item.page ? 'secondary' : 'ghost'}
+                size="sm"
                 onClick={() => onNavigate(item.page)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  currentPage === item.page
-                    ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800'
+                className={`text-xs h-7 px-3 ${
+                  currentPage === item.page ? 'font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {item.label}
-              </button>
+              </Button>
             ))}
-          </div>
+          </nav>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Link
-            href="/admin-login"
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-300 dark:hover:bg-blue-900/20 transition-all"
-          >
-            <Shield className="w-3.5 h-3.5" />
-            Admin
+        {/* Right Actions */}
+        <div className="flex items-center gap-2">
+          <Link href="/admin-login">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground border-border"
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Admin</span>
+            </Button>
           </Link>
 
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={toggleLanguage}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-medium transition-colors"
+            className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground px-2"
           >
-            {language === 'en' ? 'አማርኛ' : 'EN'}
-          </button>
-          
+            <Globe className="w-3.5 h-3.5" />
+            <span>{language === 'en' ? 'አማርኛ' : 'EN'}</span>
+          </Button>
+
           {isLoggedIn ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <Button
+                size="sm"
                 onClick={() => onNavigate('dashboard')}
-                variant="ghost"
-                className="text-sm"
+                className="h-7 text-xs gap-1.5 font-medium shadow-2xs"
               >
-                Dashboard
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                Workspace
               </Button>
               <Button
+                variant="ghost"
+                size="sm"
                 onClick={onLogout}
-                variant="outline"
-                className="text-sm border-slate-300 dark:border-slate-600"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                title={t('logout')}
               >
-                {t('logout')}
+                <LogOut className="w-3.5 h-3.5" />
               </Button>
             </div>
           ) : (
             <Button
+              size="sm"
               onClick={() => onNavigate('reportTax')}
-              className="text-sm bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-sm"
+              className="h-7 text-xs font-medium shadow-2xs"
             >
               {t('login')}
             </Button>
           )}
         </div>
       </div>
-    </nav>
+    </header>
   );
 }

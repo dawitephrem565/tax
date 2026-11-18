@@ -31,3 +31,7 @@ nextdev.log
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# local dev artifacts
+dev.log
+build.log
+dev.pid

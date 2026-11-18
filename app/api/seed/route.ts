@@ -1,72 +1,69 @@
 import { NextResponse } from "next/server"
-import bcrypt from "bcryptjs"
-import { connectDB } from "@/lib/db"
-import { Admin } from "@/lib/models/admin"
-import { Company } from "@/lib/models/company"
+import { createAdminSupabase } from "@/lib/supabase/admin"
 
-const DEFAULT_COMPANIES = [
-  {
-    fullName: "ABC Trading PLC",
-    companyAddress: "Bole Subcity, Addis Ababa",
-    tinNumber: "TIN-001-2024",
-    phone: "+251911123456",
-    email: "abc@example.com",
-    status: "approved",
-  },
-  {
-    fullName: "XYZ Construction PLC",
-    companyAddress: "Kirkos Subcity, Addis Ababa",
-    tinNumber: "TIN-002-2024",
-    phone: "+251922234567",
-    email: "xyz@example.com",
-    status: "pending",
-  },
-  {
-    fullName: "Global Imports PLC",
-    companyAddress: "Mexico Square, Addis Ababa",
-    tinNumber: "TIN-003-2024",
-    phone: "+251933345678",
-    email: "global@example.com",
-    status: "pending",
-  },
-]
+export const dynamic = "force-dynamic"
 
-export async function GET() {
-  try {
-    await connectDB()
-
-    const existingAdmin = await Admin.findOne({ username: "admin" })
-    if (!existingAdmin) {
-      const hashedPassword = await bcrypt.hash("admin123", 12)
-      await Admin.create({ username: "admin", password: hashedPassword })
-    }
-
-    let companiesCreated = 0
-    for (const c of DEFAULT_COMPANIES) {
-      const existing = await Company.findOne({ email: c.email })
-      if (!existing) {
-        const hashedPassword = await bcrypt.hash("password123", 12)
-        await Company.create({
-          ...c,
-          password: hashedPassword,
-          files: {
-            license: "/uploads/demo-license.pdf",
-            licenseRegistration: "/uploads/demo-reg.pdf",
-            vatCertificate: "/uploads/demo-vat.pdf",
-            tinCertificate: "/uploads/demo-tin.pdf",
-          },
-        })
-        companiesCreated++
-      }
-    }
-
-    return NextResponse.json({
-      message: "Seed completed",
-      admin: { username: "admin", password: "admin123" },
-      companiesSeeded: companiesCreated,
-    })
-  } catch (error) {
-    console.error("Seed error:", error)
-    return NextResponse.json({ error: "Seed failed" }, { status: 500 })
+/**
+ * One-time bootstrap: creates the first platform admin.
+ * Requires SEED_SECRET to match the x-seed-secret header, and refuses to run
+ * once any platform admin exists.
+ */
+export async function POST(req: Request) {
+  const secret = process.env.SEED_SECRET
+  if (!secret || req.headers.get("x-seed-secret") !== secret) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+
+  const email = process.env.SEED_ADMIN_EMAIL
+  const password = process.env.SEED_ADMIN_PASSWORD
+
+  if (!email || !password) {
+    return NextResponse.json(
+      { error: "Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD first" },
+      { status: 400 }
+    )
+  }
+
+  const admin = createAdminSupabase()
+
+  const { data: existingAdmin } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("is_platform_admin", true)
+    .limit(1)
+    .maybeSingle()
+
+  if (existingAdmin) {
+    return NextResponse.json({ message: "A platform admin already exists" })
+  }
+
+  const { data: created, error } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: "Platform Admin" },
+  })
+
+  if (error || !created.user) {
+    return NextResponse.json(
+      { error: error?.message ?? "Could not create the admin user" },
+      { status: 400 }
+    )
+  }
+
+  const { error: profileError } = await admin
+    .from("profiles")
+    .upsert(
+      { id: created.user.id, email, full_name: "Platform Admin", is_platform_admin: true },
+      { onConflict: "id" }
+    )
+
+  if (profileError) {
+    return NextResponse.json({ error: "Could not grant administrator access" }, { status: 500 })
+  }
+
+  return NextResponse.json(
+    { message: "Platform admin created", email },
+    { status: 201 }
+  )
 }
