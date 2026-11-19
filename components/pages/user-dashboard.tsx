@@ -84,15 +84,19 @@ interface EmployeeRow {
   name: string;
   tin: string;
   basic: number;
-  transport: number;
-  overtime: number;
-  otherAllowance: number;
   workDays: number;
-  gross: number;
-  pensionEmp: number;
+  earnedBasic: number;
+  overtime: number;
+  taxableAllowance: number;
+  transport: number;
   pensionOrg: number;
+  gross: number;
   taxableIncome: number;
   tax: number;
+  pensionEmp: number;
+  advance: number;
+  otherDeductions: number;
+  totalDeductions: number;
   net: number;
 }
 
@@ -103,6 +107,23 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
   // Reports Modal
   const [isNewReportModalOpen, setIsNewReportModalOpen] = useState(false);
+
+  // Helper: Retrieve valid auth token (supports company user token or adminToken)
+  const getAuthToken = () => {
+    if (typeof window === 'undefined') return '';
+    const token = localStorage.getItem('token') || localStorage.getItem('adminToken');
+    if (!token || token === 'undefined' || token === 'null') return '';
+    return token;
+  };
+
+  const handleAuthError = (err: any, fallbackMessage: string) => {
+    const msg = err?.message || fallbackMessage;
+    if (msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('401')) {
+      toast.error('Session expired or unauthorized. Please log out (top-right) and sign in again.');
+      return;
+    }
+    toast.error(msg);
+  };
 
   // ==========================================
   // 1. TREASURY & BANK BALANCE STATE
@@ -123,7 +144,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
   const fetchTreasury = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/treasury', {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -143,7 +164,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     }
     setBankLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/treasury', {
         method: 'POST',
         headers: {
@@ -166,7 +187,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       setIsBankModalOpen(false);
       fetchTreasury();
     } catch (err: any) {
-      toast.error(err.message || 'Error updating bank balance');
+      handleAuthError(err, 'Error updating bank balance');
     } finally {
       setBankLoading(false);
     }
@@ -204,7 +225,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const fetchReceipts = async () => {
     setReceiptsLoading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/receipts', {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -301,7 +322,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       return;
     }
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/receipts', {
         method: 'POST',
         headers: {
@@ -330,70 +351,128 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       fetchReceipts();
       fetchTreasury(); // update treasury
     } catch (err: any) {
-      toast.error(err.message || 'Error registering receipt');
+      handleAuthError(err, 'Error registering receipt');
     }
   };
 
   // ==========================================
-  // 3. ETHIOPIAN PAYROLL & TAX ENGINE
+  // 3. ETHIOPIAN PAYROLL & TAX ENGINE (PROCLAMATION NO. 979/2016)
   // ==========================================
-  const computeEthiopianTax = (basic: number, transport: number, overtime: number = 0, other: number = 0) => {
-    const exemptTransport = Math.min(transport, 2200, basic * 0.25);
-    const taxableAllowances = (transport - exemptTransport) + overtime + other;
-    const gross = basic + transport + overtime + other;
-    const pensionBase = basic;
-    const pensionEmp = Math.round(pensionBase * 0.07 * 100) / 100;
-    const pensionOrg = Math.round(pensionBase * 0.11 * 100) / 100;
-    const taxableIncome = Math.max(0, basic + taxableAllowances - pensionEmp);
+  const computeEthiopianTax = (
+    basic: number,
+    workDays: number = 30,
+    overtime: number = 0,
+    taxableAllowance: number = 0,
+    transport: number = 0,
+    advance: number = 0,
+    otherDeductions: number = 0
+  ) => {
+    const safeBasic = Number(basic) || 0;
+    const safeDays = Number(workDays) > 0 ? Number(workDays) : 30;
+    // Basic salary earned during the month (prorated by worked days; exactly basic if 30 days)
+    const earnedBasic = safeDays === 30 ? safeBasic : Math.round((safeBasic / 30) * safeDays * 100) / 100;
 
-    // 2025 Progressive Tax Brackets (Proclamation rules)
+    const safeOvertime = Number(overtime) || 0;
+    const safeTaxableAllowance = Number(taxableAllowance) || 0;
+    const safeTransport = Number(transport) || 0;
+    const safeAdvance = Number(advance) || 0;
+    const safeOtherDeductions = Number(otherDeductions) || 0;
+
+    // Pension calculations on earned basic salary
+    const pensionOrg = Math.round(earnedBasic * 0.11 * 100) / 100; // Employer 11%
+    const pensionEmp = Math.round(earnedBasic * 0.07 * 100) / 100; // Employee 7%
+
+    // Total Taxable Earning (Basic Earned + Overtime + Taxable Allowance)
+    const taxableIncome = Math.round((earnedBasic + safeOvertime + safeTaxableAllowance) * 100) / 100;
+
+    // Gross Earning (Total earnings including Employer 11% pension as in company payroll sheet)
+    const gross = Math.round((earnedBasic + safeOvertime + safeTaxableAllowance + safeTransport + pensionOrg) * 100) / 100;
+
+    // Legal Ethiopian Income Tax Brackets (Proclamation No. 979/2016)
+    // 0 - 600: 0%
+    // 601 - 1,650: 10% (deduction: 60)
+    // 1,651 - 3,200: 15% (deduction: 142.50)
+    // 3,201 - 5,250: 20% (deduction: 302.50)
+    // 5,251 - 7,800: 25% (deduction: 565.00)
+    // 7,801 - 10,900: 30% (deduction: 955.00)
+    // Over 10,900: 35% (deduction: 1,500.00)
     let tax = 0;
-    if (taxableIncome <= 2000) tax = 0;
-    else if (taxableIncome <= 4000) tax = (taxableIncome - 2000) * 0.10;
-    else if (taxableIncome <= 7000) tax = 200 + (taxableIncome - 4000) * 0.15;
-    else if (taxableIncome <= 10000) tax = 650 + (taxableIncome - 7000) * 0.20;
-    else if (taxableIncome <= 14000) tax = 1250 + (taxableIncome - 10000) * 0.25;
-    else if (taxableIncome <= 19000) tax = 2250 + (taxableIncome - 14000) * 0.30;
-    else tax = 3750 + (taxableIncome - 19000) * 0.35;
+    if (taxableIncome <= 600) {
+      tax = 0;
+    } else if (taxableIncome <= 1650) {
+      tax = taxableIncome * 0.10 - 60;
+    } else if (taxableIncome <= 3200) {
+      tax = taxableIncome * 0.15 - 142.50;
+    } else if (taxableIncome <= 5250) {
+      tax = taxableIncome * 0.20 - 302.50;
+    } else if (taxableIncome <= 7800) {
+      tax = taxableIncome * 0.25 - 565.00;
+    } else if (taxableIncome <= 10900) {
+      tax = taxableIncome * 0.30 - 955.00;
+    } else {
+      tax = taxableIncome * 0.35 - 1500.00;
+    }
+    tax = Math.max(0, Math.round(tax * 100) / 100);
 
-    tax = Math.round(tax * 100) / 100;
-    const net = Math.round((gross - pensionEmp - tax) * 100) / 100;
-    return { gross, pensionEmp, pensionOrg, taxableIncome, tax, net };
+    // Total Deductions = Tax + Pension 7% + Advance + Other Deductions
+    const totalDeductions = Math.round((tax + pensionEmp + safeAdvance + safeOtherDeductions) * 100) / 100;
+
+    // Net Pay = (Basic Earned + Overtime + Taxable Allowance + Transport) - Total Deductions
+    const net = Math.round((earnedBasic + safeOvertime + safeTaxableAllowance + safeTransport - totalDeductions) * 100) / 100;
+
+    return {
+      workDays: safeDays,
+      earnedBasic,
+      overtime: safeOvertime,
+      taxableAllowance: safeTaxableAllowance,
+      transport: safeTransport,
+      pensionOrg,
+      gross,
+      taxableIncome,
+      tax,
+      pensionEmp,
+      advance: safeAdvance,
+      otherDeductions: safeOtherDeductions,
+      totalDeductions,
+      net,
+    };
   };
 
   const [employees, setEmployees] = useState<EmployeeRow[]>([
     {
       id: 'emp-1',
-      name: 'Abebe Bekele',
-      tin: '1234567890',
+      name: 'Zerubabel Gebeyehu',
+      tin: '0012938475',
       basic: 25000,
-      transport: 2000,
-      overtime: 0,
-      otherAllowance: 0,
-      workDays: 30,
-      ...computeEthiopianTax(25000, 2000),
+      ...computeEthiopianTax(25000, 30),
     },
     {
       id: 'emp-2',
-      name: 'Hana Tesfaye',
-      tin: '0987654321',
-      basic: 18000,
-      transport: 1500,
-      overtime: 0,
-      otherAllowance: 0,
-      workDays: 30,
-      ...computeEthiopianTax(18000, 1500),
+      name: 'Kidus Amanuel',
+      tin: '0029384756',
+      basic: 10000,
+      ...computeEthiopianTax(10000, 30),
     },
     {
       id: 'emp-3',
-      name: 'Dawit Mengistu',
-      tin: '0011223344',
-      basic: 35000,
-      transport: 2200,
-      overtime: 1500,
-      otherAllowance: 0,
-      workDays: 30,
-      ...computeEthiopianTax(35000, 2200, 1500),
+      name: 'Atnafu Anja',
+      tin: '0038475612',
+      basic: 8000,
+      ...computeEthiopianTax(8000, 30),
+    },
+    {
+      id: 'emp-4',
+      name: 'Amira',
+      tin: '0047561293',
+      basic: 14656,
+      ...computeEthiopianTax(14656, 30),
+    },
+    {
+      id: 'emp-5',
+      name: 'Rahel Solomon',
+      tin: '0056129384',
+      basic: 14656,
+      ...computeEthiopianTax(14656, 30),
     },
   ]);
 
@@ -403,7 +482,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
   const fetchPayroll = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/payroll', {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -411,17 +490,17 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         const data = await res.json();
         if (data.lastCalculatedAt) setLastCalculatedAt(data.lastCalculatedAt);
         if (data.payslips && data.payslips.length > 0) {
-          const loadedRows: EmployeeRow[] = data.payslips.map((p: any, idx: number) => ({
-            id: p.id || `emp-load-${idx}`,
-            name: p.employee_name,
-            tin: p.employee_tin || '',
-            basic: Number(p.basic_salary),
-            transport: Number(p.transport_allowance),
-            overtime: 0,
-            otherAllowance: 0,
-            workDays: 30,
-            ...computeEthiopianTax(Number(p.basic_salary), Number(p.transport_allowance)),
-          }));
+          const loadedRows: EmployeeRow[] = data.payslips.map((p: any, idx: number) => {
+            const basic = Number(p.basic_salary) || 0;
+            const transport = Number(p.transport_allowance) || 0;
+            return {
+              id: p.id || `emp-load-${idx}`,
+              name: p.employee_name,
+              tin: p.employee_tin || p.tin || '',
+              basic,
+              ...computeEthiopianTax(basic, 30, 0, 0, transport),
+            };
+          });
           setEmployees(loadedRows);
         }
       }
@@ -436,10 +515,13 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         if (emp.id !== id) return emp;
         const updated = { ...emp, [field]: val };
         const basic = Number(field === 'basic' ? val : updated.basic) || 0;
-        const transport = Number(field === 'transport' ? val : updated.transport) || 0;
+        const workDays = Number(field === 'workDays' ? val : updated.workDays) || 30;
         const overtime = Number(field === 'overtime' ? val : updated.overtime) || 0;
-        const other = Number(field === 'otherAllowance' ? val : updated.otherAllowance) || 0;
-        const calc = computeEthiopianTax(basic, transport, overtime, other);
+        const taxableAllowance = Number(field === 'taxableAllowance' ? val : updated.taxableAllowance) || 0;
+        const transport = Number(field === 'transport' ? val : updated.transport) || 0;
+        const advance = Number(field === 'advance' ? val : updated.advance) || 0;
+        const otherDeductions = Number(field === 'otherDeductions' ? val : updated.otherDeductions) || 0;
+        const calc = computeEthiopianTax(basic, workDays, overtime, taxableAllowance, transport, advance, otherDeductions);
         return { ...updated, ...calc };
       })
     );
@@ -451,12 +533,8 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       id: newId,
       name: `Staff Member ${employees.length + 1}`,
       tin: '',
-      basic: 15000,
-      transport: 1500,
-      overtime: 0,
-      otherAllowance: 0,
-      workDays: 30,
-      ...computeEthiopianTax(15000, 1500),
+      basic: 10000,
+      ...computeEthiopianTax(10000, 30),
     };
     setEmployees((prev) => [...prev, newEmp]);
   };
@@ -489,19 +567,14 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         const parts = lines[i].split(',').map((p) => p.trim());
         if (parts.length >= 2) {
           const name = parts[0] || `Employee ${i}`;
-          const tin = parts[1] || '';
-          const basic = parseFloat(parts[2]) || 12000;
-          const transport = parseFloat(parts[3]) || 1000;
+          const basic = parseFloat(parts[1]) || parseFloat(parts[2]) || 10000;
+          const days = parseFloat(parts[3]) || 30;
           newRows.push({
             id: `csv-emp-${Date.now()}-${i}`,
             name,
-            tin,
+            tin: '',
             basic,
-            transport,
-            overtime: 0,
-            otherAllowance: 0,
-            workDays: 30,
-            ...computeEthiopianTax(basic, transport),
+            ...computeEthiopianTax(basic, days),
           });
         }
       }
@@ -517,13 +590,17 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
   const payrollTotals = employees.reduce(
     (acc, e) => ({
-      gross: acc.gross + e.gross,
-      pensionEmp: acc.pensionEmp + e.pensionEmp,
-      pensionOrg: acc.pensionOrg + e.pensionOrg,
-      tax: acc.tax + e.tax,
-      net: acc.net + e.net,
+      basic: acc.basic + (e.basic || 0),
+      earnedBasic: acc.earnedBasic + (e.earnedBasic || 0),
+      gross: acc.gross + (e.gross || 0),
+      taxableIncome: acc.taxableIncome + (e.taxableIncome || 0),
+      pensionEmp: acc.pensionEmp + (e.pensionEmp || 0),
+      pensionOrg: acc.pensionOrg + (e.pensionOrg || 0),
+      tax: acc.tax + (e.tax || 0),
+      totalDeductions: acc.totalDeductions + (e.totalDeductions || 0),
+      net: acc.net + (e.net || 0),
     }),
-    { gross: 0, pensionEmp: 0, pensionOrg: 0, tax: 0, net: 0 }
+    { basic: 0, earnedBasic: 0, gross: 0, taxableIncome: 0, pensionEmp: 0, pensionOrg: 0, tax: 0, totalDeductions: 0, net: 0 }
   );
 
   const totalPayrollDeduction = Math.round((payrollTotals.net + payrollTotals.tax + payrollTotals.pensionEmp + payrollTotals.pensionOrg) * 100) / 100;
@@ -531,7 +608,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const handleConfirmPayrollRun = async () => {
     setPayrollPosting(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/payroll', {
         method: 'POST',
         headers: {
@@ -553,26 +630,28 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       setIsPayrollModalOpen(false);
       fetchTreasury(); // Updates available bank balance
     } catch (err: any) {
-      toast.error(err.message || 'Error processing payroll');
+      handleAuthError(err, 'Error processing payroll');
     } finally {
       setPayrollPosting(false);
     }
   };
 
   const handleDownloadPayrollCSV = () => {
-    const headers = 'Employee Name,TIN,Basic Salary,Transport Allowance,Overtime,Gross Salary,Employee Pension 7%,Employer Pension 11%,Taxable Income,Income Tax,Net Pay';
+    const headers = 'S/N,Name of Employees,Basic Salary,Worked Days,Basic Salary Earned During the Month,Over time,Taxable Allowance,Nontaxable Allowance (Transport),Pension 11%,Gross Earning,Total Taxable Earning,Total Income Tax,Pension 7%,Advance,Other Deductions,Total Deductions,Net Pay';
     const rows = employees.map(
-      (e) => `"${e.name}","${e.tin}",${e.basic},${e.transport},${e.overtime},${e.gross},${e.pensionEmp},${e.pensionOrg},${e.taxableIncome},${e.tax},${e.net}`
+      (e, idx) =>
+        `${idx + 1},"${e.name}",${e.basic},${e.workDays},${e.earnedBasic},${e.overtime},${e.taxableAllowance},${e.transport},${e.pensionOrg},${e.gross},${e.taxableIncome},${e.tax},${e.pensionEmp},${e.advance},${e.otherDeductions},${e.totalDeductions},${e.net}`
     );
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
+    const totalRow = `TOTAL,${payrollTotals.basic},,${payrollTotals.earnedBasic},,,,${payrollTotals.pensionOrg},${payrollTotals.gross},${payrollTotals.taxableIncome},${payrollTotals.tax},${payrollTotals.pensionEmp},,,,${payrollTotals.totalDeductions},${payrollTotals.net}`;
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows, totalRow].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Ethiopia_Payroll_Run_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `Ethiopia_Payroll_Sheet_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success('Payroll CSV downloaded!');
+    toast.success('Payroll sheet CSV downloaded!');
   };
 
   // ==========================================
@@ -702,7 +781,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
   const fetchAgreements = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/agreements', {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -738,7 +817,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     setEditorSaving(true);
     const content = editorRef.current ? editorRef.current.innerHTML : activeAgreement.html;
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/agreements', {
         method: 'POST',
         headers: {
@@ -757,7 +836,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       if (!res.ok) throw new Error(data.error || 'Failed to save agreement');
       toast.success('Agreement updated with rich Word formatting!');
     } catch (err: any) {
-      toast.error(err.message || 'Error saving agreement');
+      handleAuthError(err, 'Error saving agreement');
     } finally {
       setEditorSaving(false);
     }
@@ -794,7 +873,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
   const fetchFileBoxes = async (cat?: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const url = cat ? `/api/company/fileboxes?category=${cat}` : '/api/company/fileboxes';
       const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -816,7 +895,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     }
     setFbUploading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const formData = new FormData();
       formData.append('file', fbUploadFile);
 
@@ -857,7 +936,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       setFbUploadNotes('');
       fetchFileBoxes(selectedFileBoxCat || undefined);
     } catch (err: any) {
-      toast.error(err.message || 'Error uploading to File Box');
+      handleAuthError(err, 'Error uploading to File Box');
     } finally {
       setFbUploading(false);
     }
@@ -894,7 +973,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
   const fetchStock = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/stock', {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -918,7 +997,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     }
     setIsAddingProduct(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/stock', {
         method: 'POST',
         headers: {
@@ -947,7 +1026,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       setNewProdImage('');
       fetchStock();
     } catch (err: any) {
-      toast.error(err.message || 'Error adding product');
+      handleAuthError(err, 'Error adding product');
     } finally {
       setIsAddingProduct(false);
     }
@@ -956,7 +1035,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const handleProductImageUpload = async (file: File) => {
     setProdImageUploading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const formData = new FormData();
       formData.append('file', file);
       const res = await fetch('/api/upload', {
@@ -970,7 +1049,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       setNewProdImage(url);
       toast.success('Product image uploaded successfully!');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to upload product image');
+      handleAuthError(err, 'Failed to upload product image');
     } finally {
       setProdImageUploading(false);
     }
@@ -979,7 +1058,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const handleStockAdjustSubmit = async () => {
     if (!selectedStockProduct || !adjustQty) return;
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const res = await fetch('/api/company/stock', {
         method: 'POST',
         headers: {
@@ -1002,7 +1081,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       setIsStockAdjustModalOpen(false);
       fetchStock();
     } catch (err: any) {
-      toast.error(err.message || 'Error adjusting stock');
+      handleAuthError(err, 'Error adjusting stock');
     }
   };
 
@@ -1448,9 +1527,9 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
             <div className="bg-background p-4 rounded-xl border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-sm">2025 Ethiopian Income Tax & Payroll Calculator</h3>
+                  <h3 className="font-semibold text-sm">Ethiopian Income Tax & Payroll Calculator</h3>
                   <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
-                    August 2025 Reform Rules
+                    Proclamation No. 979/2016
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
@@ -1542,7 +1621,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                     {/* Totals Row */}
                     <TableRow className="text-xs font-semibold bg-muted/40 border-t border-border">
                       <TableCell colSpan={2}>Total ({employees.length} Staff)</TableCell>
-                      <TableCell>{payrollTotals.gross.toLocaleString()} ETB</TableCell>
+                      <TableCell>{payrollTotals.basic.toLocaleString()} ETB</TableCell>
                       <TableCell>—</TableCell>
                       <TableCell className="text-amber-600">-{payrollTotals.pensionEmp.toLocaleString()}</TableCell>
                       <TableCell>+{payrollTotals.pensionOrg.toLocaleString()}</TableCell>
@@ -2158,18 +2237,18 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       {/* MODAL 2: LARGE PAYROLL & INCOME TAX CALCULATOR */}
       {/* ========================================================= */}
       <Dialog open={isPayrollModalOpen} onOpenChange={setIsPayrollModalOpen}>
-        <DialogContent className="sm:max-w-[96vw] xl:max-w-7xl w-[96vw] max-h-[92vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[98vw] xl:max-w-[96vw] w-[98vw] max-h-[94vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <DialogTitle className="text-base font-semibold flex items-center gap-2">
-                  <span>2025 Ethiopian Payroll & Income Tax Calculator</span>
+                  <span>Ethiopian Payroll & Income Tax Sheet</span>
                   <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
-                    Proclamation 1364/2024
+                    Proclamation No. 979/2016 Compliant
                   </Badge>
                 </DialogTitle>
                 <DialogDescription className="text-xs">
-                  Each employee row is editable in full view. On clicking Done, the total net payroll will be automatically deducted from your Company Bank Balance.
+                  Exact Ethiopian payroll calculations (Pension 7%/11%, progressive tax brackets, worked days prorating). On clicking Done, total payroll is deducted from Company Bank Balance.
                 </DialogDescription>
               </div>
 
@@ -2194,7 +2273,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   className="h-8 text-xs gap-1.5"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  Download CSV
+                  Download Payroll Sheet CSV
                 </Button>
 
                 <Button
@@ -2211,23 +2290,25 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* Full View Editable Employee Table */}
+            {/* Full View Editable Employee Table Matching Excel Sheet */}
             <div className="border border-border rounded-lg overflow-x-auto shadow-2xs">
-              <Table>
+              <Table className="min-w-[1200px]">
                 <TableHeader>
-                  <TableRow className="text-xs bg-muted/40">
-                    <TableHead className="w-44 min-w-[160px]">Employee Name</TableHead>
-                    <TableHead className="w-28 min-w-[110px]">TIN</TableHead>
-                    <TableHead className="w-28 min-w-[110px]">Basic Salary (ETB)</TableHead>
-                    <TableHead className="w-24 min-w-[100px]">Transport</TableHead>
-                    <TableHead className="w-24 min-w-[100px]">Overtime / Other</TableHead>
-                    <TableHead className="w-24 min-w-[95px]">Gross Salary</TableHead>
-                    <TableHead className="w-24 min-w-[95px]">Taxable</TableHead>
-                    <TableHead className="w-24 min-w-[95px]">7% Pension</TableHead>
-                    <TableHead className="w-24 min-w-[95px]">11% Pension</TableHead>
-                    <TableHead className="w-24 min-w-[95px]">18% Total</TableHead>
-                    <TableHead className="w-24 min-w-[95px]">2025 Tax</TableHead>
-                    <TableHead className="w-28 min-w-[120px] font-semibold">Net Salary</TableHead>
+                  <TableRow className="text-[11px] bg-muted/40 font-semibold">
+                    <TableHead className="w-40 min-w-[150px]">Employee Name</TableHead>
+                    <TableHead className="w-24 min-w-[90px]">Basic Salary</TableHead>
+                    <TableHead className="w-16 min-w-[65px]">Days</TableHead>
+                    <TableHead className="w-24 min-w-[90px] text-muted-foreground">Basic Earned</TableHead>
+                    <TableHead className="w-20 min-w-[75px]">Overtime</TableHead>
+                    <TableHead className="w-24 min-w-[85px]">Taxable Allow.</TableHead>
+                    <TableHead className="w-24 min-w-[85px]">Transport</TableHead>
+                    <TableHead className="w-24 min-w-[90px] text-muted-foreground">Pension 11%</TableHead>
+                    <TableHead className="w-24 min-w-[95px] font-medium text-foreground">Gross Earning</TableHead>
+                    <TableHead className="w-24 min-w-[95px] font-medium text-foreground">Taxable Earning</TableHead>
+                    <TableHead className="w-24 min-w-[95px] text-red-600 dark:text-red-400 font-semibold">Income Tax</TableHead>
+                    <TableHead className="w-24 min-w-[90px] text-amber-600 dark:text-amber-400">Pension 7%</TableHead>
+                    <TableHead className="w-24 min-w-[95px] text-red-700 dark:text-red-300">Total Deductions</TableHead>
+                    <TableHead className="w-28 min-w-[110px] font-bold text-primary">Net Pay</TableHead>
                     <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -2243,14 +2324,6 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                       </TableCell>
                       <TableCell>
                         <Input
-                          value={emp.tin}
-                          onChange={(e) => handleUpdateEmployee(emp.id, 'tin', e.target.value)}
-                          placeholder="TIN"
-                          className="h-8 text-xs font-mono"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
                           type="number"
                           value={emp.basic}
                           onChange={(e) => handleUpdateEmployee(emp.id, 'basic', Number(e.target.value))}
@@ -2260,36 +2333,58 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                       <TableCell>
                         <Input
                           type="number"
-                          value={emp.transport}
-                          onChange={(e) => handleUpdateEmployee(emp.id, 'transport', Number(e.target.value))}
+                          value={emp.workDays}
+                          onChange={(e) => handleUpdateEmployee(emp.id, 'workDays', Number(e.target.value))}
+                          className="h-8 text-xs text-center"
+                        />
+                      </TableCell>
+                      <TableCell className="font-mono text-muted-foreground">
+                        {emp.earnedBasic.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={emp.overtime || ''}
+                          placeholder="0"
+                          onChange={(e) => handleUpdateEmployee(emp.id, 'overtime', Number(e.target.value))}
                           className="h-8 text-xs"
                         />
                       </TableCell>
                       <TableCell>
                         <Input
                           type="number"
-                          value={emp.overtime}
-                          onChange={(e) => handleUpdateEmployee(emp.id, 'overtime', Number(e.target.value))}
+                          value={emp.taxableAllowance || ''}
+                          placeholder="0"
+                          onChange={(e) => handleUpdateEmployee(emp.id, 'taxableAllowance', Number(e.target.value))}
                           className="h-8 text-xs"
                         />
                       </TableCell>
-                      <TableCell className="font-mono text-foreground font-medium">
-                        {emp.gross.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="font-mono text-muted-foreground">
-                        {emp.taxableIncome.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="font-mono text-amber-600 dark:text-amber-400">
-                        -{emp.pensionEmp.toLocaleString()}
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={emp.transport || ''}
+                          placeholder="0"
+                          onChange={(e) => handleUpdateEmployee(emp.id, 'transport', Number(e.target.value))}
+                          className="h-8 text-xs"
+                        />
                       </TableCell>
                       <TableCell className="font-mono text-muted-foreground">
                         +{emp.pensionOrg.toLocaleString()}
                       </TableCell>
-                      <TableCell className="font-mono text-muted-foreground">
-                        {(emp.pensionEmp + emp.pensionOrg).toLocaleString()}
+                      <TableCell className="font-mono font-medium text-foreground">
+                        {emp.gross.toLocaleString()}
                       </TableCell>
-                      <TableCell className="font-mono text-red-600 dark:text-red-400">
+                      <TableCell className="font-mono text-foreground font-semibold">
+                        {emp.taxableIncome.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="font-mono text-red-600 dark:text-red-400 font-semibold">
                         -{emp.tax.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="font-mono text-amber-600 dark:text-amber-400">
+                        -{emp.pensionEmp.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="font-mono text-red-700 dark:text-red-300 font-medium">
+                        -{emp.totalDeductions.toLocaleString()}
                       </TableCell>
                       <TableCell className="font-mono font-bold text-primary">
                         {emp.net.toLocaleString()} ETB
@@ -2311,13 +2406,17 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
             </div>
 
             {/* Summary & Bank Balance Deduction Notice */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-muted/40 rounded-xl border border-border text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-4 bg-muted/40 rounded-xl border border-border text-xs">
               <div>
-                <span className="text-muted-foreground block text-[11px]">Total Gross Salary:</span>
+                <span className="text-muted-foreground block text-[11px]">Total Basic Salary:</span>
+                <span className="text-sm font-bold">{payrollTotals.basic.toLocaleString()} ETB</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[11px]">Total Gross Earnings:</span>
                 <span className="text-sm font-bold">{payrollTotals.gross.toLocaleString()} ETB</span>
               </div>
               <div>
-                <span className="text-muted-foreground block text-[11px]">Total 2025 Income Tax:</span>
+                <span className="text-muted-foreground block text-[11px]">Total Income Tax:</span>
                 <span className="text-sm font-bold text-red-600">-{payrollTotals.tax.toLocaleString()} ETB</span>
               </div>
               <div>
@@ -2327,13 +2426,13 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                 </span>
               </div>
               <div>
-                <span className="text-muted-foreground block text-[11px]">Total Net Payroll Payout:</span>
+                <span className="text-muted-foreground block text-[11px]">Total Net Pay:</span>
                 <span className="text-sm font-bold text-primary">{payrollTotals.net.toLocaleString()} ETB</span>
               </div>
 
               <div className="col-span-full pt-2 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <span className="text-muted-foreground">
-                  🏦 Bank Balance Impact: <strong>{totalPayrollDeduction.toLocaleString()} ETB</strong> will be deducted from your Company Bank Balance upon confirmation.
+                  🏦 Bank Balance Impact: <strong>{totalPayrollDeduction.toLocaleString()} ETB</strong> (Net Salaries + Taxes + Pensions) will be deducted from your Company Bank Balance upon confirmation.
                 </span>
                 <span className="font-semibold text-foreground">
                   Available Bank Balance: {treasury.availableBalance.toLocaleString()} ETB
@@ -2734,7 +2833,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
               if (item.file) {
                 const formData = new FormData();
                 formData.append('file', item.file);
-                const token = localStorage.getItem('token');
+                const token = getAuthToken();
                 const uploadRes = await fetch('/api/upload', {
                   method: 'POST',
                   headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -2746,7 +2845,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
               }
             }
 
-            const token = localStorage.getItem('token');
+            const token = getAuthToken();
             const res = await fetch('/api/reports', {
               method: 'POST',
               headers: {
@@ -2768,7 +2867,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
             setIsNewReportModalOpen(false);
           } catch (err: any) {
             console.error('Submit report error:', err);
-            toast.error(err.message || 'Failed to submit report');
+            handleAuthError(err, 'Failed to submit report');
           }
         }}
       />

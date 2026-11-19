@@ -20,32 +20,45 @@ export async function authenticate(req: Request): Promise<AuthContext | null> {
 
   if (header?.startsWith("Bearer ")) {
     const token = header.slice("Bearer ".length).trim()
-    if (!token) return null
-    const { url, anonKey } = supabaseEnv()
-    const supabase = createClient(url, anonKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-    const { data, error } = await supabase.auth.getUser(token)
-    if (error || !data.user) return null
-    return {
-      userId: data.user.id,
-      email: data.user.email ?? null,
-      supabase,
-      isPlatformAdmin: await readIsPlatformAdmin(supabase, data.user.id),
+    if (token && token !== "undefined" && token !== "null") {
+      try {
+        const { url, anonKey } = supabaseEnv()
+        const supabase = createClient(url, anonKey, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+          auth: { autoRefreshToken: false, persistSession: false },
+        })
+        const { data, error } = await supabase.auth.getUser(token)
+        if (!error && data?.user) {
+          return {
+            userId: data.user.id,
+            email: data.user.email ?? null,
+            supabase,
+            isPlatformAdmin: await readIsPlatformAdmin(supabase, data.user.id),
+          }
+        }
+      } catch (err) {
+        console.warn("Bearer token verification error:", err)
+      }
     }
   }
 
-  const supabase = await createServerSupabase()
-  const { data } = await supabase.auth.getUser()
-  if (!data.user) return null
-
-  return {
-    userId: data.user.id,
-    email: data.user.email ?? null,
-    supabase,
-    isPlatformAdmin: await readIsPlatformAdmin(supabase, data.user.id),
+  // Fallback to cookie-based Supabase session
+  try {
+    const supabase = await createServerSupabase()
+    const { data, error } = await supabase.auth.getUser()
+    if (!error && data?.user) {
+      return {
+        userId: data.user.id,
+        email: data.user.email ?? null,
+        supabase,
+        isPlatformAdmin: await readIsPlatformAdmin(supabase, data.user.id),
+      }
+    }
+  } catch (err) {
+    console.warn("Cookie session verification error:", err)
   }
+
+  return null
 }
 
 async function readIsPlatformAdmin(supabase: SupabaseClient, userId: string) {
