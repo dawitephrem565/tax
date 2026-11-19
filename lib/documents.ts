@@ -21,6 +21,11 @@ export const LEGACY_DOCUMENT_KEYS: Record<string, string> = {
   license_registration: "licenseRegistration",
   vat_certificate: "vatCertificate",
   tin_certificate: "tinCertificate",
+  neged_mezgeba: "negedMezgeba",
+  neged_seyame: "negedSeyame",
+  home_rent_wel: "homeRentWel",
+  manager_national_id: "managerNationalId",
+  metedadriya_denb: "metedadriyaDenb",
 }
 
 export const ACCEPTED_UPLOAD_TYPES = [

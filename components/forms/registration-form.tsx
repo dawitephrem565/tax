@@ -344,11 +344,10 @@ export default function RegistrationForm({
                           key={type}
                           type="button"
                           onClick={() => updateField('companyType', type)}
-                          className={`h-9 rounded-md border text-xs font-medium transition-colors ${
-                            formData.companyType === type
+                          className={`h-9 rounded-md border text-xs font-medium transition-colors ${formData.companyType === type
                               ? 'border-primary bg-primary text-primary-foreground'
                               : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                          }`}
+                            }`}
                         >
                           {type}
                         </button>
@@ -384,11 +383,10 @@ export default function RegistrationForm({
                           key={region}
                           type="button"
                           onClick={() => { updateField('branchRegion', region); updateField('branchOffice', ''); }}
-                          className={`h-9 rounded-md border text-xs font-medium transition-colors ${
-                            formData.branchRegion === region
+                          className={`h-9 rounded-md border text-xs font-medium transition-colors ${formData.branchRegion === region
                               ? 'border-primary bg-primary text-primary-foreground'
                               : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                          }`}
+                            }`}
                         >
                           {region === 'Addis Ababa' ? 'Addis Ababa Revenue Bureau (AARB)' : 'Federal Ministry of Revenue (MOR)'}
                         </button>
@@ -552,9 +550,8 @@ export default function RegistrationForm({
                           return (
                             <div
                               key={slot.field}
-                              className={`border border-dashed rounded-xl p-3 bg-background flex flex-col justify-between gap-2 ${
-                                isRequired && !file ? 'border-amber-400/60' : 'border-border'
-                              }`}
+                              className={`border border-dashed rounded-xl p-3 bg-background flex flex-col justify-between gap-2 ${isRequired && !file ? 'border-amber-400/60' : 'border-border'
+                                }`}
                             >
                               <div>
                                 <span className="text-xs font-semibold block leading-tight">

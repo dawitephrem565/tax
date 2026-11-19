@@ -20,6 +20,18 @@ type OnboardingDocument = {
   fileName?: string
   mimeType?: string
   fileSize?: number
+  licenseId?: string
+}
+
+type OnboardingLicense = {
+  licenseName?: string
+  licenseNumber?: string
+  licenseType?: string
+  companyType?: string
+  branchRegion?: string
+  branchOffice?: string
+  isPrimary?: boolean
+  documents?: OnboardingDocument[]
 }
 
 const COMPANY_ROLES = ["company_admin", "accountant", "payroll_officer", "payroll_manager", "ceo"]
@@ -32,12 +44,17 @@ const DOCUMENT_TYPES = [
   "trade_license_2",
   "vat_certificate_1",
   "vat_certificate_2",
+  "neged_mezgeba",
+  "neged_seyame",
+  "home_rent_wel",
+  "manager_national_id",
+  "metedadriya_denb",
   "other",
 ]
 
 /**
- * Super-admin onboarding, the equivalent of ethiopia.company.onboarding:
- * creates the company, its licence documents and its first logins in one step.
+ * Super-admin onboarding:
+ * creates the company, its license documents, multi-license records, and its first logins in one step.
  */
 export async function POST(req: Request) {
   const auth = await requirePlatformAdmin(req)
@@ -48,8 +65,9 @@ export async function POST(req: Request) {
   try {
     const body = await req.json()
     const company = body.company ?? {}
-    const documents: OnboardingDocument[] = Array.isArray(body.documents) ? body.documents : []
+    const rawDocuments: OnboardingDocument[] = Array.isArray(body.documents) ? body.documents : []
     const users: OnboardingUser[] = Array.isArray(body.users) ? body.users : []
+    const licenses: OnboardingLicense[] = Array.isArray(body.licenses) ? body.licenses : []
 
     const name = String(company.name ?? "").trim()
     const tin = String(company.tin ?? "").trim()
@@ -57,6 +75,10 @@ export async function POST(req: Request) {
     const address = String(company.address ?? "").trim()
     const phone = String(company.phone ?? "").trim()
     const managerPhone = String(company.managerPhone ?? "").trim()
+    const companyType = company.companyType ? String(company.companyType).trim() : null
+    const memberCount = company.memberCount ? Number(company.memberCount) : null
+    const branchRegion = company.branchRegion ? String(company.branchRegion).trim() : null
+    const branchOffice = company.branchOffice ? String(company.branchOffice).trim() : null
 
     if (!name || !tin || !email) {
       return NextResponse.json(
@@ -101,20 +123,27 @@ export async function POST(req: Request) {
       )
     }
 
+    const companyPayload: Record<string, unknown> = {
+      name,
+      tin,
+      email,
+      address: address || null,
+      phone: phone || null,
+      manager_phone: managerPhone || null,
+      business_type_id: company.businessTypeId || null,
+      status: "approved",
+      approved_at: new Date().toISOString(),
+      approved_by: auth.ctx.userId,
+    }
+
+    if (companyType) companyPayload.company_type = companyType
+    if (memberCount) companyPayload.member_count = memberCount
+    if (branchRegion) companyPayload.branch_region = branchRegion
+    if (branchOffice) companyPayload.branch_office = branchOffice
+
     const { data: created, error: companyError } = await admin
       .from("companies")
-      .insert({
-        name,
-        tin,
-        email,
-        address: address || null,
-        phone: phone || null,
-        manager_phone: managerPhone || null,
-        business_type_id: company.businessTypeId || null,
-        status: "approved",
-        approved_at: new Date().toISOString(),
-        approved_by: auth.ctx.userId,
-      })
+      .insert(companyPayload)
       .select("id, name, tin")
       .single()
 
@@ -125,9 +154,61 @@ export async function POST(req: Request) {
 
     const companyId = created.id as string
 
+    // Process Licenses
+    const createdLicenseIds: Record<string, string> = {}
+    if (licenses.length > 0) {
+      for (let i = 0; i < licenses.length; i++) {
+        const lic = licenses[i]
+        try {
+          const { data: licData } = await admin
+            .from("company_licenses")
+            .insert({
+              company_id: companyId,
+              license_name: lic.licenseName || (i === 0 ? "Main License" : `License ${i + 1}`),
+              license_number: lic.licenseNumber || null,
+              license_type: lic.licenseType || "Business License",
+              is_primary: lic.isPrimary ?? i === 0,
+            })
+            .select("id")
+            .single()
+          if (licData?.id) {
+            createdLicenseIds[`license_${i}`] = licData.id
+          }
+        } catch {
+          // company_licenses table might not exist
+        }
+      }
+    } else {
+      // Default primary license
+      try {
+        await admin.from("company_licenses").insert({
+          company_id: companyId,
+          license_name: "Main License",
+          license_number: null,
+          license_type: "Business License",
+          is_primary: true,
+        })
+      } catch {
+        // silent
+      }
+    }
+
+    // Combine flat documents and license documents
+    const allDocumentsToProcess: OnboardingDocument[] = [...rawDocuments]
+    licenses.forEach((lic, idx) => {
+      if (Array.isArray(lic.documents)) {
+        lic.documents.forEach((d) => {
+          allDocumentsToProcess.push({
+            ...d,
+            licenseId: createdLicenseIds[`license_${idx}`],
+          })
+        })
+      }
+    })
+
     // Move uploaded files into the company folder, then record them.
     const documentRows: Record<string, unknown>[] = []
-    for (const doc of documents) {
+    for (const doc of allDocumentsToProcess) {
       const sourcePath = extractStoragePath(doc.path)
       if (!sourcePath) continue
       const type = DOCUMENT_TYPES.includes(doc.type ?? "") ? doc.type! : "other"
@@ -139,7 +220,7 @@ export async function POST(req: Request) {
         .move(sourcePath, targetPath)
 
       const finalPath = moveError ? sourcePath : targetPath
-      documentRows.push({
+      const docRow: Record<string, unknown> = {
         company_id: companyId,
         document_type: type,
         storage_path: finalPath,
@@ -147,7 +228,11 @@ export async function POST(req: Request) {
         mime_type: doc.mimeType ?? null,
         file_size: doc.fileSize ?? null,
         uploaded_by: auth.ctx.userId,
-      })
+      }
+      if (doc.licenseId) {
+        docRow.license_id = doc.licenseId
+      }
+      documentRows.push(docRow)
     }
 
     if (documentRows.length > 0) {
