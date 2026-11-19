@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
@@ -286,7 +286,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         setOcrEngine(json.engine ?? 'unknown');
         setConfidenceNotes(d.confidence_notes ?? []);
         const engineLabel = json.engine === 'vision-llm' ? 'Gemini Vision' : 'Tesseract Fallback';
-        toast.success(`${engineLabel}: FS ${d.fs_number || '—'}, Total ${d.total_amount?.toLocaleString() ?? '—'} ETB`);
+        toast.success(`${engineLabel}: FS ${d.fs_number || 'â€”'}, Total ${d.total_amount?.toLocaleString() ?? 'â€”'} ETB`);
       } else {
         toast.warning('Extraction returned no data. Fill fields manually.');
       }
@@ -660,103 +660,103 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const DEFAULT_PUBLISHED_AGREEMENTS = [
     {
       id: 'tpl-1',
-      title: 'Standard Ethiopian Employment Agreement (የቅጥር ውል ስምምነት)',
+      title: 'Standard Ethiopian Employment Agreement (á‹¨á‰…áŒ¥áˆ­ á‹áˆ áˆµáˆáˆáŠá‰µ)',
       category: 'Labour / HR',
       desc: 'Compliant with Labour Proclamation No. 1156/2019. Covers employee job duties, probation period, monthly salary, 7% & 11% pension deductions, annual leave, and lawful termination terms.',
       updatedAt: '2026-11-15',
       html: `
 <h2 style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 16px;">
-  የቅጥር ውል ስምምነት (EMPLOYMENT AGREEMENT)
+  á‹¨á‰…áŒ¥áˆ­ á‹áˆ áˆµáˆáˆáŠá‰µ (EMPLOYMENT AGREEMENT)
 </h2>
 <p style="margin-bottom: 12px;">
-  ይህ የቅጥር ውል ስምምነት በአሰሪው <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> (የግብር ከፋይ መለያ ቁጥር: <strong>${user?.tinNumber || '0012938475'}</strong>) እና በሰራተኛው መካከል በአሰሪና ሰራተኛ ጉዳይ አዋጅ ቁጥር 1156/2011 (Labour Proclamation No. 1156/2019) መሰረት ተዘጋጅቶ ዛሬ ተፈርሟል።
+  á‹­áˆ… á‹¨á‰…áŒ¥áˆ­ á‹áˆ áˆµáˆáˆáŠá‰µ á‰ áŠ áˆ°áˆªá‹ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> (á‹¨áŒá‰¥áˆ­ áŠ¨á‹á‹­ áˆ˜áˆˆá‹« á‰áŒ¥áˆ­: <strong>${user?.tinNumber || '0012938475'}</strong>) áŠ¥áŠ“ á‰ áˆ°áˆ«á‰°áŠ›á‹ áˆ˜áŠ«áŠ¨áˆ á‰ áŠ áˆ°áˆªáŠ“ áˆ°áˆ«á‰°áŠ› áŒ‰á‹³á‹­ áŠ á‹‹áŒ… á‰áŒ¥áˆ­ 1156/2011 (Labour Proclamation No. 1156/2019) áˆ˜áˆ°áˆ¨á‰µ á‰°á‹˜áŒ‹áŒ…á‰¶ á‹›áˆ¬ á‰°áˆáˆ­áˆŸáˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  1. የስራ መደብ እና ኃላፊነት (Job Position & Duties)
+  1. á‹¨áˆµáˆ« áˆ˜á‹°á‰¥ áŠ¥áŠ“ áŠƒáˆ‹áŠáŠá‰µ (Job Position & Duties)
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  ሰራተኛው በተሰጠው የሥራ ዝርዝር መሠረት ሙያዊ ግዴታውን በታማኝነት፣ በጥራት እና በትጋት ለማከናወን ተስማምቷል። የስራ ቦታው በአዲስ አበባ ዋና መ/ቤት ይሆናል።
+  áˆ°áˆ«á‰°áŠ›á‹ á‰ á‰°áˆ°áŒ á‹ á‹¨áˆ¥áˆ« á‹áˆ­á‹áˆ­ áˆ˜áˆ áˆ¨á‰µ áˆ™á‹«á‹Š áŒá‹´á‰³á‹áŠ• á‰ á‰³áˆ›áŠáŠá‰µá£ á‰ áŒ¥áˆ«á‰µ áŠ¥áŠ“ á‰ á‰µáŒ‹á‰µ áˆˆáˆ›áŠ¨áŠ“á‹ˆáŠ• á‰°áˆµáˆ›áˆá‰·áˆá¢ á‹¨áˆµáˆ« á‰¦á‰³á‹ á‰ áŠ á‹²áˆµ áŠ á‰ á‰£ á‹‹áŠ“ áˆ˜/á‰¤á‰µ á‹­áˆ†áŠ“áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  2. ደመወዝ እና የግብር ተቀናሽ (Compensation & Statutory Deductions)
+  2. á‹°áˆ˜á‹ˆá‹ áŠ¥áŠ“ á‹¨áŒá‰¥áˆ­ á‰°á‰€áŠ“áˆ½ (Compensation & Statutory Deductions)
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  የሰራተኛው ወርሃዊ መሰረታዊ ደመወዝ በሕግ በተደነገገው መሠረት የሚከፈል ሲሆን፣ በ2017/2025 የገቢ ግብር አዋጅ መሰረት ተገቢው የስራ ግብር እና 7% የሰራተኛ እንዲሁም 11% የአሰሪ የጡረታ መዋጮ ተቀናሽ ተደርጎ በወቅቱ ለመንግስት ገቢ ይደረጋል።
+  á‹¨áˆ°áˆ«á‰°áŠ›á‹ á‹ˆáˆ­áˆƒá‹Š áˆ˜áˆ°áˆ¨á‰³á‹Š á‹°áˆ˜á‹ˆá‹ á‰ áˆ•áŒ á‰ á‰°á‹°áŠáŒˆáŒˆá‹ áˆ˜áˆ áˆ¨á‰µ á‹¨áˆšáŠ¨áˆáˆ áˆ²áˆ†áŠ•á£ á‰ 2017/2025 á‹¨áŒˆá‰¢ áŒá‰¥áˆ­ áŠ á‹‹áŒ… áˆ˜áˆ°áˆ¨á‰µ á‰°áŒˆá‰¢á‹ á‹¨áˆµáˆ« áŒá‰¥áˆ­ áŠ¥áŠ“ 7% á‹¨áˆ°áˆ«á‰°áŠ› áŠ¥áŠ•á‹²áˆáˆ 11% á‹¨áŠ áˆ°áˆª á‹¨áŒ¡áˆ¨á‰³ áˆ˜á‹‹áŒ® á‰°á‰€áŠ“áˆ½ á‰°á‹°áˆ­áŒŽ á‰ á‹ˆá‰…á‰± áˆˆáˆ˜áŠ•áŒáˆµá‰µ áŒˆá‰¢ á‹­á‹°áˆ¨áŒ‹áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  3. የውል ፀናበት ጊዜ እና ማቋረጥ (Term & Termination)
+  3. á‹¨á‹áˆ á€áŠ“á‰ á‰µ áŒŠá‹œ áŠ¥áŠ“ áˆ›á‰‹áˆ¨áŒ¥ (Term & Termination)
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  ይህ ውል ላልተወሰነ ጊዜ የፀና ሲሆን በአዋጅ ቁጥር 1156/2011 በተደነገጉት ድንጋጌዎች መሠረት ብቻ ይቋረጣል።
+  á‹­áˆ… á‹áˆ áˆ‹áˆá‰°á‹ˆáˆ°áŠ áŒŠá‹œ á‹¨á€áŠ“ áˆ²áˆ†áŠ• á‰ áŠ á‹‹áŒ… á‰áŒ¥áˆ­ 1156/2011 á‰ á‰°á‹°áŠáŒˆáŒ‰á‰µ á‹µáŠ•áŒ‹áŒŒá‹Žá‰½ áˆ˜áˆ áˆ¨á‰µ á‰¥á‰» á‹­á‰‹áˆ¨áŒ£áˆá¢
 </p>
 <br/>
 <div style="display: flex; justify-content: space-between; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
-  <div><strong>አሰሪ (Employer):</strong> ______________________</div>
-  <div><strong>ሰራተኛ (Employee):</strong> ______________________</div>
+  <div><strong>áŠ áˆ°áˆª (Employer):</strong> ______________________</div>
+  <div><strong>áˆ°áˆ«á‰°áŠ› (Employee):</strong> ______________________</div>
 </div>
       `,
     },
     {
       id: 'tpl-2',
-      title: 'Commercial Property & Office Lease Agreement (የቢሮ ኪራይ ውል)',
+      title: 'Commercial Property & Office Lease Agreement (á‹¨á‰¢áˆ® áŠªáˆ«á‹­ á‹áˆ)',
       category: 'Real Estate / Leases',
       desc: 'Commercial rental agreement for premises in Addis Ababa. Includes monthly rental rate, security deposit, utility charges, maintenance obligations, and tax withholding compliance.',
       updatedAt: '2026-11-10',
       html: `
 <h2 style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 16px;">
-  የቢሮና የንግድ ቤት ኪራይ ውል ስምምነት (COMMERCIAL LEASE AGREEMENT)
+  á‹¨á‰¢áˆ®áŠ“ á‹¨áŠ•áŒá‹µ á‰¤á‰µ áŠªáˆ«á‹­ á‹áˆ áˆµáˆáˆáŠá‰µ (COMMERCIAL LEASE AGREEMENT)
 </h2>
 <p style="margin-bottom: 12px;">
-  ይህ የኪራይ ውል ስምምነት በአከራይ እና በተከራይ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> (TIN: <strong>${user?.tinNumber || '0012938475'}</strong>) መካከል በአዲስ አበባ ከተማ ተደርጓል።
+  á‹­áˆ… á‹¨áŠªáˆ«á‹­ á‹áˆ áˆµáˆáˆáŠá‰µ á‰ áŠ áŠ¨áˆ«á‹­ áŠ¥áŠ“ á‰ á‰°áŠ¨áˆ«á‹­ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> (TIN: <strong>${user?.tinNumber || '0012938475'}</strong>) áˆ˜áŠ«áŠ¨áˆ á‰ áŠ á‹²áˆµ áŠ á‰ á‰£ áŠ¨á‰°áˆ› á‰°á‹°áˆ­áŒ“áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  1. የተከራየው ንብረት እና የኪራይ ዋጋ
+  1. á‹¨á‰°áŠ¨áˆ«á‹¨á‹ áŠ•á‰¥áˆ¨á‰µ áŠ¥áŠ“ á‹¨áŠªáˆ«á‹­ á‹‹áŒ‹
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  ተከራዩ የተጠቀሰውን የንግድ ቢሮ በወር የተስማሙበትን ኪራይ በየወሩ መጀመሪያ 5 ቀናት ውስጥ ለመክፈል ተስማምቷል። ተከራዩ በሕግ የተጣለውን የኪራይ ገቢ ግብር ተቀናሽ (Withholding Tax) በማድረግ ደረሰኝ ይሰጣል።
+  á‰°áŠ¨áˆ«á‹© á‹¨á‰°áŒ á‰€áˆ°á‹áŠ• á‹¨áŠ•áŒá‹µ á‰¢áˆ® á‰ á‹ˆáˆ­ á‹¨á‰°áˆµáˆ›áˆ™á‰ á‰µáŠ• áŠªáˆ«á‹­ á‰ á‹¨á‹ˆáˆ© áˆ˜áŒ€áˆ˜áˆªá‹« 5 á‰€áŠ“á‰µ á‹áˆµáŒ¥ áˆˆáˆ˜áŠ­áˆáˆ á‰°áˆµáˆ›áˆá‰·áˆá¢ á‰°áŠ¨áˆ«á‹© á‰ áˆ•áŒ á‹¨á‰°áŒ£áˆˆá‹áŠ• á‹¨áŠªáˆ«á‹­ áŒˆá‰¢ áŒá‰¥áˆ­ á‰°á‰€áŠ“áˆ½ (Withholding Tax) á‰ áˆ›á‹µáˆ¨áŒ á‹°áˆ¨áˆ°áŠ á‹­áˆ°áŒ£áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  2. የውል ቆይታ
+  2. á‹¨á‹áˆ á‰†á‹­á‰³
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  ይህ ውል ለአንድ (1) ዓመት የፀና ሆኖ በሁለቱም ወገኖች የጋራ ስምምነት ሊታደስ ይችላል።
+  á‹­áˆ… á‹áˆ áˆˆáŠ áŠ•á‹µ (1) á‹“áˆ˜á‰µ á‹¨á€áŠ“ áˆ†áŠ– á‰ áˆáˆˆá‰±áˆ á‹ˆáŒˆáŠ–á‰½ á‹¨áŒ‹áˆ« áˆµáˆáˆáŠá‰µ áˆŠá‰³á‹°áˆµ á‹­á‰½áˆ‹áˆá¢
 </p>
 <br/>
 <div style="display: flex; justify-content: space-between; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
-  <div><strong>አከራይ (Landlord):</strong> ______________________</div>
-  <div><strong>ተከራይ (Tenant):</strong> ______________________</div>
+  <div><strong>áŠ áŠ¨áˆ«á‹­ (Landlord):</strong> ______________________</div>
+  <div><strong>á‰°áŠ¨áˆ«á‹­ (Tenant):</strong> ______________________</div>
 </div>
       `,
     },
     {
       id: 'tpl-3',
-      title: 'Equipment & Goods Supply Agreement (የዕቃና መሣሪያዎች አቅርቦት ውል)',
+      title: 'Equipment & Goods Supply Agreement (á‹¨á‹•á‰ƒáŠ“ áˆ˜áˆ£áˆªá‹«á‹Žá‰½ áŠ á‰…áˆ­á‰¦á‰µ á‹áˆ)',
       category: 'Procurement / Stock',
       desc: 'Goods procurement terms covering quality inspection, VAT 15% invoicing, delivery timelines, and 3% withholding tax compliance on transactions above 10,000 ETB.',
       updatedAt: '2026-11-08',
       html: `
 <h2 style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 16px;">
-  የዕቃና መሣሪያዎች አቅርቦት ውል (GOODS SUPPLY AGREEMENT)
+  á‹¨á‹•á‰ƒáŠ“ áˆ˜áˆ£áˆªá‹«á‹Žá‰½ áŠ á‰…áˆ­á‰¦á‰µ á‹áˆ (GOODS SUPPLY AGREEMENT)
 </h2>
 <p style="margin-bottom: 12px;">
-  ይህ የአቅርቦት ውል በአቅራቢ እና በገዢ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> መካከል ተደርጓል።
+  á‹­áˆ… á‹¨áŠ á‰…áˆ­á‰¦á‰µ á‹áˆ á‰ áŠ á‰…áˆ«á‰¢ áŠ¥áŠ“ á‰ áŒˆá‹¢ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> áˆ˜áŠ«áŠ¨áˆ á‰°á‹°áˆ­áŒ“áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  1. የዕቃው ዓይነት እና የጥራት ደረጃ
+  1. á‹¨á‹•á‰ƒá‹ á‹“á‹­áŠá‰µ áŠ¥áŠ“ á‹¨áŒ¥áˆ«á‰µ á‹°áˆ¨áŒƒ
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  አቅራቢው በግዢ ትዕዛዙ (Purchase Order) ላይ የተመለከቱትን እቃዎች በተገቢው ጥራት እና መጠን በወቅቱ የማስረከብ ኃላፊነት አለበት።
+  áŠ á‰…áˆ«á‰¢á‹ á‰ áŒá‹¢ á‰µá‹•á‹›á‹™ (Purchase Order) áˆ‹á‹­ á‹¨á‰°áˆ˜áˆˆáŠ¨á‰±á‰µáŠ• áŠ¥á‰ƒá‹Žá‰½ á‰ á‰°áŒˆá‰¢á‹ áŒ¥áˆ«á‰µ áŠ¥áŠ“ áˆ˜áŒ áŠ• á‰ á‹ˆá‰…á‰± á‹¨áˆ›áˆµáˆ¨áŠ¨á‰¥ áŠƒáˆ‹áŠáŠá‰µ áŠ áˆˆá‰ á‰µá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  2. ክፍያ እና የታክስ ደረሰኝ
+  2. áŠ­áá‹« áŠ¥áŠ“ á‹¨á‰³áŠ­áˆµ á‹°áˆ¨áˆ°áŠ
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  ክፍያው የሚፈጸመው ሕጋዊ የገንዘብ መቀበያ የጥሬ ገንዘብ መመዝገቢያ ማሽን ደረሰኝ (Fiscal Cash Register Receipt) ሲቀርብ ብቻ ነው። 15% ተጨማሪ እሴት ታክስ (VAT) እና 3% የዊዝሆልዲንግ ታክስ በሕጉ መሠረት ተፈጻሚ ይሆናል።
+  áŠ­áá‹«á‹ á‹¨áˆšáˆáŒ¸áˆ˜á‹ áˆ•áŒ‹á‹Š á‹¨áŒˆáŠ•á‹˜á‰¥ áˆ˜á‰€á‰ á‹« á‹¨áŒ¥áˆ¬ áŒˆáŠ•á‹˜á‰¥ áˆ˜áˆ˜á‹áŒˆá‰¢á‹« áˆ›áˆ½áŠ• á‹°áˆ¨áˆ°áŠ (Fiscal Cash Register Receipt) áˆ²á‰€áˆ­á‰¥ á‰¥á‰» áŠá‹á¢ 15% á‰°áŒ¨áˆ›áˆª áŠ¥áˆ´á‰µ á‰³áŠ­áˆµ (VAT) áŠ¥áŠ“ 3% á‹¨á‹Šá‹áˆ†áˆá‹²áŠ•áŒ á‰³áŠ­áˆµ á‰ áˆ•áŒ‰ áˆ˜áˆ áˆ¨á‰µ á‰°áˆáŒ»áˆš á‹­áˆ†áŠ“áˆá¢
 </p>
 <br/>
 <div style="display: flex; justify-content: space-between; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
-  <div><strong>አቅራቢ (Supplier):</strong> ______________________</div>
-  <div><strong>ገዢ (Buyer):</strong> ______________________</div>
+  <div><strong>áŠ á‰…áˆ«á‰¢ (Supplier):</strong> ______________________</div>
+  <div><strong>áŒˆá‹¢ (Buyer):</strong> ______________________</div>
 </div>
       `,
     },
@@ -1085,6 +1085,97 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     }
   };
 
+  // ==========================================
+  // 7. MULTI-LICENSE / COMPANY SELECTOR STATE
+  // ==========================================
+  interface LicenseInfo {
+    id: string;
+    license_name: string;
+    license_number: string | null;
+    license_type: string;
+    is_primary: boolean;
+  }
+
+  const [companyLicenses, setCompanyLicenses] = useState<LicenseInfo[]>([
+    { id: 'main', license_name: 'Main License', license_number: null, license_type: 'Business License', is_primary: true },
+  ]);
+  const [activeLicenseId, setActiveLicenseId] = useState<string>('main');
+  const [isAddLicenseModalOpen, setIsAddLicenseModalOpen] = useState(false);
+  const [newLicenseName, setNewLicenseName] = useState('');
+  const [newLicenseNumber, setNewLicenseNumber] = useState('');
+  const [newLicenseType, setNewLicenseType] = useState('Business License');
+
+  const activeLicense = companyLicenses.find((l) => l.id === activeLicenseId) ?? companyLicenses[0];
+
+  // Per-license payroll: map licenseId â†’ EmployeeRow[]
+  const [perLicenseEmployees, setPerLicenseEmployees] = useState<Record<string, EmployeeRow[]>>({});
+  const [payrollLicenseSelector, setPayrollLicenseSelector] = useState(false);
+  const [payrollTargetLicenseId, setPayrollTargetLicenseId] = useState<string>('');
+
+  const fetchLicenses = async () => {
+    try {
+      const token = getAuthToken();
+      const res = await fetch('/api/company/licenses', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.licenses && data.licenses.length > 0) {
+          setCompanyLicenses(data.licenses);
+          const primary = data.licenses.find((l: LicenseInfo) => l.is_primary) ?? data.licenses[0];
+          setActiveLicenseId(primary.id);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load licenses:', err);
+    }
+  };
+
+  const handleAddLicenseSubmit = async () => {
+    if (!newLicenseName.trim()) {
+      toast.error('License name is required.');
+      return;
+    }
+    try {
+      const token = getAuthToken();
+      const res = await fetch('/api/company/licenses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          license_name: newLicenseName,
+          license_number: newLicenseNumber,
+          license_type: newLicenseType,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add license');
+      toast.success(`License "${newLicenseName}" added!`);
+      setIsAddLicenseModalOpen(false);
+      setNewLicenseName('');
+      setNewLicenseNumber('');
+      setNewLicenseType('Business License');
+      await fetchLicenses();
+    } catch (err: any) {
+      toast.error(err.message || 'Error adding license');
+    }
+  };
+
+  // Get employees for a specific license (falls back to main employees list)
+  const getEmployeesForLicense = (licId: string): EmployeeRow[] => {
+    return perLicenseEmployees[licId] ?? employees;
+  };
+
+  const setEmployeesForLicense = (licId: string, rows: EmployeeRow[]) => {
+    if (licId === activeLicenseId && companyLicenses.length === 1) {
+      setEmployees(rows);
+    } else {
+      setPerLicenseEmployees((prev) => ({ ...prev, [licId]: rows }));
+    }
+  };
+
   // Initial Load
   useEffect(() => {
     fetchTreasury();
@@ -1093,6 +1184,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     fetchStock();
     fetchAgreements();
     fetchFileBoxes();
+    fetchLicenses();
   }, []);
 
   if (!user) return null;
@@ -1115,7 +1207,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-[11px]">
                     TIN: {user.tinNumber}
                   </span>
-                  <span>•</span>
+                  <span>â€¢</span>
                   <span>{user.companyAddress}</span>
                 </div>
               </div>
@@ -1186,6 +1278,37 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
       {/* Main Workspace Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+        {/* â”€â”€ COMPANY / LICENSE SELECTOR BAR â”€â”€ */}
+        {companyLicenses.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/30 rounded-xl border border-border">
+            <span className="text-xs font-semibold text-muted-foreground shrink-0">License / Sub-Company:</span>
+            {companyLicenses.map((lic) => (
+              <button
+                key={lic.id}
+                onClick={() => setActiveLicenseId(lic.id)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
+                  activeLicenseId === lic.id
+                    ? 'border-primary bg-primary text-primary-foreground shadow-xs'
+                    : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/50'
+                }`}
+              >
+                {lic.is_primary && <Building2 className="w-3 h-3" />}
+                {lic.license_name}
+                {lic.license_number && (
+                  <span className="font-mono text-[9px] opacity-70">#{lic.license_number}</span>
+                )}
+              </button>
+            ))}
+            <button
+              onClick={() => setIsAddLicenseModalOpen(true)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+            >
+              <Plus className="w-3 h-3" />
+              Add License
+            </button>
+          </div>
+        )}
         {/* ========================================================= */}
         {/* TAB 1: EXECUTIVE KPI & TREASURY */}
         {/* ========================================================= */}
@@ -1334,7 +1457,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                     {receiptsList.map((r) => (
                       <TableRow key={r.id} className="text-xs hover:bg-muted/30">
                         <TableCell className="font-mono font-medium">{r.fs_number}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{r.machine_number || '—'}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">{r.machine_number || 'â€”'}</TableCell>
                         <TableCell>
                           <Badge variant="secondary" className="text-[10px] capitalize">
                             {r.receipt_type}
@@ -1342,13 +1465,13 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                         </TableCell>
                         <TableCell>
                           <span className="font-medium">{r.partner_name}</span>
-                          <span className="block text-[10px] font-mono text-muted-foreground">{r.partner_tin || '—'}</span>
+                          <span className="block text-[10px] font-mono text-muted-foreground">{r.partner_tin || 'â€”'}</span>
                         </TableCell>
                         <TableCell>{(r.untaxed_amount || 0).toLocaleString()}</TableCell>
                         <TableCell className="text-blue-600 dark:text-blue-400">+{(r.vat_15 || 0).toLocaleString()}</TableCell>
                         <TableCell className="text-emerald-600 dark:text-emerald-400">-{(r.wht_3 || 0).toLocaleString()}</TableCell>
                         <TableCell className="font-bold">{(r.total_amount || 0).toLocaleString()} ETB</TableCell>
-                        <TableCell className="text-muted-foreground">{r.receipt_date || '—'}</TableCell>
+                        <TableCell className="text-muted-foreground">{r.receipt_date || 'â€”'}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
                             {r.state || 'registered'}
@@ -1440,10 +1563,10 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                                   {f.filename}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
-                                  {f.file_size ? `${Math.round(f.file_size / 1024)} KB` : '—'}
+                                  {f.file_size ? `${Math.round(f.file_size / 1024)} KB` : 'â€”'}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground max-w-[200px] truncate">
-                                  {f.notes || '—'}
+                                  {f.notes || 'â€”'}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
                                   {new Date(f.created_at).toLocaleDateString()}
@@ -1537,7 +1660,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                 </p>
                 {lastCalculatedAt && (
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ Last calculated & deducted on: {new Date(lastCalculatedAt).toLocaleString()}
+                    âœ“ Last calculated & deducted on: {new Date(lastCalculatedAt).toLocaleString()}
                   </p>
                 )}
               </div>
@@ -1558,11 +1681,21 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
                 <Button
                   size="sm"
-                  onClick={() => setIsPayrollModalOpen(true)}
+                  onClick={() => {
+                    if (companyLicenses.length > 1) {
+                      setPayrollTargetLicenseId(activeLicenseId);
+                      setPayrollLicenseSelector(true);
+                    } else {
+                      setIsPayrollModalOpen(true);
+                    }
+                  }}
                   className="h-8 text-xs gap-1.5 shadow-xs"
                 >
                   <Calculator className="w-3.5 h-3.5" />
                   Calculate Income Tax & Payroll
+                  {companyLicenses.length > 1 && (
+                    <span className="ml-1 text-[10px] opacity-70">({activeLicense?.license_name})</span>
+                  )}
                 </Button>
 
                 <Button
@@ -1609,7 +1742,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                     {employees.map((emp) => (
                       <TableRow key={emp.id} className="text-xs hover:bg-muted/30">
                         <TableCell className="font-medium">{emp.name}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{emp.tin || '—'}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">{emp.tin || 'â€”'}</TableCell>
                         <TableCell>{emp.basic.toLocaleString()} ETB</TableCell>
                         <TableCell>{emp.transport.toLocaleString()} ETB</TableCell>
                         <TableCell className="text-amber-600 dark:text-amber-400">-{emp.pensionEmp.toLocaleString()}</TableCell>
@@ -1622,7 +1755,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                     <TableRow className="text-xs font-semibold bg-muted/40 border-t border-border">
                       <TableCell colSpan={2}>Total ({employees.length} Staff)</TableCell>
                       <TableCell>{payrollTotals.basic.toLocaleString()} ETB</TableCell>
-                      <TableCell>—</TableCell>
+                      <TableCell>â€”</TableCell>
                       <TableCell className="text-amber-600">-{payrollTotals.pensionEmp.toLocaleString()}</TableCell>
                       <TableCell>+{payrollTotals.pensionOrg.toLocaleString()}</TableCell>
                       <TableCell className="text-red-600">-{payrollTotals.tax.toLocaleString()}</TableCell>
@@ -1913,7 +2046,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                           )}
                         </TableCell>
                         <TableCell className="font-semibold">{p.name}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{p.code || '—'}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">{p.code || 'â€”'}</TableCell>
                         <TableCell>{p.unit_of_measure}</TableCell>
                         <TableCell className="font-bold text-primary">
                           {(p.quantity_on_hand || 0).toLocaleString()} {p.unit_of_measure}
@@ -2017,7 +2150,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
             </DialogDescription>
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 mt-1">
               <AlertTriangle className="w-3 h-3 shrink-0" />
-              <span>Fields with amber borders were not extracted — verify and fill manually before registering.</span>
+              <span>Fields with amber borders were not extracted â€” verify and fill manually before registering.</span>
             </div>
           </DialogHeader>
 
@@ -2243,6 +2376,9 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
               <div>
                 <DialogTitle className="text-base font-semibold flex items-center gap-2">
                   <span>Ethiopian Payroll & Income Tax Sheet</span>
+                  {companyLicenses.length > 1 && (
+                    <Badge variant="secondary" className="text-[10px]">{activeLicense?.license_name}</Badge>
+                  )}
                   <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
                     Proclamation No. 979/2016 Compliant
                   </Badge>
@@ -2432,7 +2568,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
               <div className="col-span-full pt-2 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <span className="text-muted-foreground">
-                  🏦 Bank Balance Impact: <strong>{totalPayrollDeduction.toLocaleString()} ETB</strong> (Net Salaries + Taxes + Pensions) will be deducted from your Company Bank Balance upon confirmation.
+                  ðŸ¦ Bank Balance Impact: <strong>{totalPayrollDeduction.toLocaleString()} ETB</strong> (Net Salaries + Taxes + Pensions) will be deducted from your Company Bank Balance upon confirmation.
                 </span>
                 <span className="font-semibold text-foreground">
                   Available Bank Balance: {treasury.availableBalance.toLocaleString()} ETB
@@ -2778,7 +2914,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-base font-semibold">
-                Adjust Stock — {selectedStockProduct.name}
+                Adjust Stock â€” {selectedStockProduct.name}
               </DialogTitle>
               <DialogDescription className="text-xs">
                 Current on-hand: {selectedStockProduct.quantity_on_hand} {selectedStockProduct.unit_of_measure}
@@ -2871,6 +3007,119 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           }
         }}
       />
+
+      {/* â”€â”€ ADD LICENSE MODAL â”€â”€ */}
+      {isAddLicenseModalOpen && (
+        <Dialog open={isAddLicenseModalOpen} onOpenChange={setIsAddLicenseModalOpen}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-base font-semibold">Add New License / Sub-Company</DialogTitle>
+              <DialogDescription className="text-xs">
+                Register an additional business license under the same main company account.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="space-y-1">
+                <Label className="text-xs">License / Trade Name</Label>
+                <Input
+                  value={newLicenseName}
+                  onChange={(e) => setNewLicenseName(e.target.value)}
+                  placeholder="e.g. Import Division License"
+                  className="h-9 text-xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">License Number (optional)</Label>
+                <Input
+                  value={newLicenseNumber}
+                  onChange={(e) => setNewLicenseNumber(e.target.value)}
+                  placeholder="e.g. LIC-2024-00456"
+                  className="h-9 text-xs font-mono"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">License Type</Label>
+                <select
+                  value={newLicenseType}
+                  onChange={(e) => setNewLicenseType(e.target.value)}
+                  className="w-full h-9 rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option>Business License</option>
+                  <option>Import License</option>
+                  <option>Export License</option>
+                  <option>Service License</option>
+                  <option>Construction License</option>
+                  <option>Manufacturing License</option>
+                  <option>Other</option>
+                </select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setIsAddLicenseModalOpen(false)} className="text-xs h-8">
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleAddLicenseSubmit} className="text-xs h-8 shadow-xs">
+                <Plus className="w-3 h-3 mr-1" />
+                Add License
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* â”€â”€ PAYROLL LICENSE SELECTOR MODAL â”€â”€ */}
+      {payrollLicenseSelector && (
+        <Dialog open={payrollLicenseSelector} onOpenChange={setPayrollLicenseSelector}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-base font-semibold">Select Company / License for Payroll</DialogTitle>
+              <DialogDescription className="text-xs">
+                Choose which license's employee list to calculate payroll for.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-2">
+              {companyLicenses.map((lic) => {
+                const empCount = getEmployeesForLicense(lic.id).length;
+                return (
+                  <button
+                    key={lic.id}
+                    onClick={() => {
+                      setPayrollTargetLicenseId(lic.id);
+                      setPayrollLicenseSelector(false);
+                      setIsPayrollModalOpen(true);
+                    }}
+                    className={`w-full flex items-center justify-between p-3 rounded-lg border text-xs text-left transition-colors hover:border-primary/60 hover:bg-muted/30 ${
+                      payrollTargetLicenseId === lic.id ? 'border-primary bg-primary/5' : 'border-border'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <div>
+                        <div className="font-medium">{lic.license_name}</div>
+                        {lic.license_number && (
+                          <div className="font-mono text-muted-foreground text-[10px]">#{lic.license_number}</div>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-muted-foreground shrink-0 ml-2">
+                      {empCount} staff
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setPayrollLicenseSelector(false)} className="text-xs h-8">
+                Cancel
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
     </div>
   );
 }
+
+
+

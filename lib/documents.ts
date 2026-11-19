@@ -7,6 +7,11 @@ export const DOCUMENT_LABELS: Record<string, string> = {
   trade_license_2: "Trade Licence 2",
   vat_certificate_1: "VAT Certificate 1",
   vat_certificate_2: "VAT Certificate 2",
+  neged_mezgeba: "Neged Mezgeba (Company Registration File)",
+  neged_seyame: "Neged Seyame (Brand Name Authorization)",
+  home_rent_wel: "Home Rent Wel (Lease File)",
+  manager_national_id: "National ID of General Manager",
+  metedadriya_denb: "Metedadriya Denb (Location Authorization)",
   other: "Other Document",
 }
 

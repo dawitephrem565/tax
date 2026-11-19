@@ -12,6 +12,19 @@ const LEGACY_DOCUMENTS: { field: string; type: string }[] = [
   { field: "tinCertificate", type: "tin_certificate" },
 ]
 
+// All document slots from the new registration form
+const ALL_DOCUMENT_SLOTS: { field: string; type: string }[] = [
+  { field: "license", type: "license" },
+  { field: "licenseRegistration", type: "license_registration" },
+  { field: "vatCertificate", type: "vat_certificate" },
+  { field: "tinCertificate", type: "tin_certificate" },
+  { field: "negedMezgeba", type: "neged_mezgeba" },
+  { field: "negedSeyame", type: "neged_seyame" },
+  { field: "homeRentWel", type: "home_rent_wel" },
+  { field: "managerNationalId", type: "manager_national_id" },
+  { field: "metedadriyaDenb", type: "metedadriya_denb" },
+]
+
 export async function POST(req: Request) {
   if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ error: CONFIG_ERROR }, { status: 503 })
@@ -21,23 +34,45 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json()
-    const { fullName, companyAddress, tinNumber, phone, password, files } = body
+    const {
+      fullName,
+      companyAddress,
+      tinNumber,
+      phone,
+      password,
+      companyType,
+      memberCount,
+      branchRegion,
+      branchOffice,
+      licenses,
+      files, // legacy top-level files (from main license)
+    } = body
     const email = String(body.email ?? "").trim().toLowerCase()
 
     if (!fullName || !companyAddress || !tinNumber || !phone || !email || !password) {
       return NextResponse.json({ error: "All fields are required" }, { status: 400 })
     }
 
-    if (String(password).length < 8) {
+    if (String(password).length < 6) {
       return NextResponse.json(
-        { error: "Password must be at least 8 characters" },
+        { error: "Password must be at least 6 characters" },
         { status: 400 }
       )
     }
 
-    const missingDocuments = LEGACY_DOCUMENTS.filter((doc) => !extractStoragePath(files?.[doc.field]))
+    // Determine which file set to use for validation — prefer new licenses[] array
+    const mainLicenseFiles = (Array.isArray(licenses) && licenses.length > 0)
+      ? licenses[0].files
+      : (files ?? {})
+
+    const missingDocuments = LEGACY_DOCUMENTS.filter(
+      (doc) => !extractStoragePath(mainLicenseFiles?.[doc.field])
+    )
     if (missingDocuments.length > 0) {
-      return NextResponse.json({ error: "All documents must be uploaded" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Business License, License Registration, VAT Certificate, and TIN Certificate are required for the main license." },
+        { status: 400 }
+      )
     }
 
     const { data: existing } = await admin
@@ -79,16 +114,23 @@ export async function POST(req: Request) {
 
     const userId = createdUser.user.id
 
+    // Build company insert payload with new optional fields
+    const companyPayload: Record<string, unknown> = {
+      name: fullName,
+      tin: tinNumber,
+      email,
+      address: companyAddress,
+      phone,
+      status: "pending",
+    }
+    if (companyType) companyPayload.company_type = companyType
+    if (memberCount) companyPayload.member_count = Number(memberCount)
+    if (branchRegion) companyPayload.branch_region = branchRegion
+    if (branchOffice) companyPayload.branch_office = branchOffice
+
     const { data: company, error: companyError } = await admin
       .from("companies")
-      .insert({
-        name: fullName,
-        tin: tinNumber,
-        email,
-        address: companyAddress,
-        phone,
-        status: "pending",
-      })
+      .insert(companyPayload)
       .select("id")
       .single()
 
@@ -118,21 +160,70 @@ export async function POST(req: Request) {
       .from("profiles")
       .upsert({ id: userId, full_name: fullName, email, phone }, { onConflict: "id" })
 
-    // Move the pre-registration uploads into the company folder.
+    // ── Process license documents ──────────────────────────────
     const documentRows: Record<string, unknown>[] = []
-    for (const doc of LEGACY_DOCUMENTS) {
-      const sourcePath = extractStoragePath(files?.[doc.field])
-      if (!sourcePath) continue
-      const fileName = sourcePath.split("/").pop() || `${doc.type}.pdf`
-      const targetPath = `companies/${companyId}/${doc.type}-${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`
-      const { error: moveError } = await admin.storage.from("documents").move(sourcePath, targetPath)
-      documentRows.push({
-        company_id: companyId,
-        document_type: doc.type,
-        storage_path: moveError ? sourcePath : targetPath,
-        file_name: fileName,
-        uploaded_by: userId,
+
+    // Determine license list to process
+    const licenseList: Array<{
+      licenseName?: string;
+      licenseNumber?: string;
+      licenseType?: string;
+      files: Record<string, string>;
+      isPrimary?: boolean;
+    }> = []
+
+    if (Array.isArray(licenses) && licenses.length > 0) {
+      licenses.forEach((lic: any, idx: number) => {
+        licenseList.push({ ...lic, isPrimary: idx === 0 })
       })
+    } else {
+      // Fallback: legacy single file set
+      licenseList.push({ files: files ?? {}, isPrimary: true })
+    }
+
+    for (let licIdx = 0; licIdx < licenseList.length; licIdx++) {
+      const lic = licenseList[licIdx]
+      const licFiles = lic.files ?? {}
+
+      // Optionally create a company_license record if the table exists
+      let licenseId: string | null = null
+      try {
+        const { data: licRow } = await admin
+          .from("company_licenses")
+          .insert({
+            company_id: companyId,
+            license_name: lic.licenseName || (licIdx === 0 ? "Main License" : `License ${licIdx + 1}`),
+            license_number: lic.licenseNumber || null,
+            license_type: lic.licenseType || "Business License",
+            is_primary: lic.isPrimary ?? licIdx === 0,
+          })
+          .select("id")
+          .single()
+        licenseId = licRow?.id ?? null
+      } catch {
+        // company_licenses table may not exist yet — silently skip
+      }
+
+      // Process each document slot for this license
+      for (const slot of ALL_DOCUMENT_SLOTS) {
+        const sourcePath = extractStoragePath(licFiles[slot.field])
+        if (!sourcePath) continue
+
+        const fileName = sourcePath.split("/").pop() || `${slot.type}.pdf`
+        const targetPath = `companies/${companyId}/${slot.type}-${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`
+        const { error: moveError } = await admin.storage.from("documents").move(sourcePath, targetPath)
+
+        const docRow: Record<string, unknown> = {
+          company_id: companyId,
+          document_type: slot.type,
+          storage_path: moveError ? sourcePath : targetPath,
+          file_name: fileName,
+          uploaded_by: userId,
+        }
+        if (licenseId) docRow.license_id = licenseId
+
+        documentRows.push(docRow)
+      }
     }
 
     if (documentRows.length > 0) {
