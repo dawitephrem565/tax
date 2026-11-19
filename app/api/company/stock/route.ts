@@ -15,15 +15,38 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'No company associated with this account' }, { status: 403 });
     }
 
+    const licenseId = req.nextUrl.searchParams.get('license_id');
+
     const admin = createAdminSupabase();
 
     let prodQuery = admin.from('stock_products').select('*').order('name');
     if (!ctx.isPlatformAdmin && companyId) {
       prodQuery = prodQuery.eq('company_id', companyId);
     }
+    if (licenseId && licenseId !== 'all') {
+      try {
+        prodQuery = prodQuery.eq('license_id', licenseId);
+      } catch {
+        // column may not exist
+      }
+    }
 
-    const { data: products, error: prodErr } = await prodQuery;
-    if (prodErr) return NextResponse.json({ error: prodErr.message }, { status: 500 });
+    let { data: products, error: prodErr } = await prodQuery;
+    if (prodErr && prodErr.message?.includes('license_id')) {
+      let fallback = admin.from('stock_products').select('*').order('name');
+      if (!ctx.isPlatformAdmin && companyId) fallback = fallback.eq('company_id', companyId);
+      const retry = await fallback;
+      if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 });
+      products = (retry.data || []).filter((p: any) => {
+        if (p.license_id) return p.license_id === licenseId;
+        if (p.code?.includes(`[Lic: ${licenseId}]`) || p.name?.includes(`[Lic: ${licenseId}]`)) return true;
+        if (licenseId === 'main' && !p.code?.includes('[Lic: ') && !p.name?.includes('[Lic: ')) return true;
+        return false;
+      });
+      prodErr = null;
+    } else if (prodErr) {
+      return NextResponse.json({ error: prodErr.message }, { status: 500 });
+    }
 
     const prodList = products || [];
     const totalProducts = prodList.length;
@@ -41,6 +64,13 @@ export async function GET(req: NextRequest) {
     let moveQuery = admin.from('stock_movements').select('*').order('date', { ascending: false }).limit(20);
     if (!ctx.isPlatformAdmin && companyId) {
       moveQuery = moveQuery.eq('company_id', companyId);
+    }
+    if (licenseId && licenseId !== 'all') {
+      try {
+        moveQuery = moveQuery.eq('license_id', licenseId);
+      } catch {
+        // silent
+      }
     }
     const { data: movements } = await moveQuery;
 
@@ -70,171 +100,93 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const {
-      action = 'add_product',
-      name,
-      code,
-      image_url,
-      unit_of_measure = 'Unit',
-      cost_price = 0,
-      unit_price = 0,
-      quantity_on_hand = 0,
-      product_id,
-      movement_type,
-      quantity,
-      reference,
-      notes,
-    } = body;
-
+    const { action, license_id } = body;
     const admin = createAdminSupabase();
 
     if (action === 'add_product') {
+      const { name, code, image_url, unit_of_measure = 'Unit', cost_price = 0, unit_price = 0, quantity_on_hand = 0 } = body;
       if (!name) return NextResponse.json({ error: 'Product name is required' }, { status: 400 });
 
-      // Deduplication check: prevent multiple rapid clicks inserting identical products
-      if (code) {
-        const { data: existingByCode } = await admin
-          .from('stock_products')
-          .select('*')
-          .eq('company_id', companyId)
-          .eq('code', code)
-          .maybeSingle();
-
-        if (existingByCode) {
-          return NextResponse.json({
-            success: true,
-            product: existingByCode,
-            message: 'Product with this code already exists (deduplicated).',
-          });
-        }
-      }
-
-      // Check by identical name created recently
-      const { data: existingByName } = await admin
-        .from('stock_products')
-        .select('*')
-        .eq('company_id', companyId)
-        .eq('name', name)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (existingByName) {
-        const timeDiff = Date.now() - new Date(existingByName.created_at).getTime();
-        if (timeDiff < 10000) {
-          // Created within 10 seconds, duplicate click suppression
-          return NextResponse.json({
-            success: true,
-            product: existingByName,
-            message: 'Duplicate click ignored. Existing product returned.',
-          });
-        }
-      }
-
-      const insertPayload: any = {
+      const prodPayload: Record<string, any> = {
         company_id: companyId,
         name,
-        code: code || null,
+        code: code || `SKU-${Date.now().toString().slice(-4)}`,
+        image_url: image_url || null,
         unit_of_measure,
-        cost_price: Number(cost_price || 0),
-        unit_price: Number(unit_price || 0),
-        quantity_on_hand: Number(quantity_on_hand || 0),
-        is_storable: true,
-        active: true,
+        cost_price: Number(cost_price),
+        unit_price: Number(unit_price),
+        quantity_on_hand: Number(quantity_on_hand),
       };
+      if (license_id && license_id !== 'main') prodPayload.license_id = license_id;
 
-      if (image_url) {
-        insertPayload.image_url = image_url;
-      }
-
-      const { data: product, error } = await admin
-        .from('stock_products')
-        .insert(insertPayload)
-        .select()
-        .single();
-
+      let product: any = null;
+      const { data, error } = await admin.from('stock_products').insert(prodPayload).select().single();
       if (error) {
-        // If image_url column doesn't exist yet, retry without it
-        if (error.message && error.message.includes('image_url')) {
-          delete insertPayload.image_url;
-          const { data: retryProduct, error: retryErr } = await admin
-            .from('stock_products')
-            .insert(insertPayload)
-            .select()
-            .single();
-          if (retryErr) return NextResponse.json({ error: retryErr.message }, { status: 500 });
-          return NextResponse.json({ success: true, product: retryProduct });
+        if (prodPayload.license_id) {
+          delete prodPayload.license_id;
+          const retry = await admin.from('stock_products').insert(prodPayload).select().single();
+          if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 });
+          product = retry.data;
+        } else {
+          return NextResponse.json({ error: error.message }, { status: 500 });
         }
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-
-      // If initial stock was given, record movement
-      if (Number(quantity_on_hand) > 0) {
-        await admin.from('stock_movements').insert({
-          company_id: companyId,
-          product_id: product.id,
-          movement_type: 'adjustment',
-          reference: 'Initial Stock Count',
-          quantity: Number(quantity_on_hand),
-          unit_price: Number(cost_price || 0),
-          status: 'done',
-          date: new Date().toISOString().split('T')[0],
-          created_by: ctx.userId,
-        });
+      } else {
+        product = data;
       }
 
       return NextResponse.json({ success: true, product });
     }
 
     if (action === 'adjust_stock') {
+      const { product_id, movement_type, quantity, reference } = body;
       if (!product_id || !quantity) {
-        return NextResponse.json({ error: 'Product ID and Quantity are required' }, { status: 400 });
+        return NextResponse.json({ error: 'Product ID and quantity are required' }, { status: 400 });
       }
 
-      const numQty = Number(quantity);
-      const moveType = movement_type || 'adjustment';
+      const { data: prod } = await admin.from('stock_products').select('quantity_on_hand').eq('id', product_id).single();
+      const currentQty = Number(prod?.quantity_on_hand || 0);
+      const moveQty = Number(quantity);
 
-      // 1. Record movement
-      await admin.from('stock_movements').insert({
+      let newQty = currentQty;
+      let signedQty = moveQty;
+      if (movement_type === 'outgoing') {
+        newQty = Math.max(0, currentQty - moveQty);
+        signedQty = -moveQty;
+      } else if (movement_type === 'incoming') {
+        newQty = currentQty + moveQty;
+        signedQty = moveQty;
+      } else {
+        newQty = moveQty;
+        signedQty = moveQty - currentQty;
+      }
+
+      await admin.from('stock_products').update({ quantity_on_hand: newQty }).eq('id', product_id);
+
+      const movePayload: Record<string, any> = {
         company_id: companyId,
         product_id,
-        movement_type: moveType,
-        reference: reference || 'Manual Stock Adjustment',
-        quantity: Math.abs(numQty),
-        status: 'done',
         date: new Date().toISOString().split('T')[0],
+        movement_type,
+        quantity: Math.abs(moveQty),
+        signed_quantity: signedQty,
+        reference: reference || 'Manual adjustment',
         created_by: ctx.userId,
-      });
+      };
+      if (license_id && license_id !== 'main') movePayload.license_id = license_id;
 
-      // 2. Update product on_hand
-      const { data: prod } = await admin
-        .from('stock_products')
-        .select('quantity_on_hand')
-        .eq('id', product_id)
-        .single();
-
-      let currentQty = Number(prod?.quantity_on_hand || 0);
-      if (moveType === 'incoming') {
-        currentQty += Math.abs(numQty);
-      } else if (moveType === 'outgoing') {
-        currentQty -= Math.abs(numQty);
-      } else {
-        currentQty = Math.max(0, numQty);
+      try {
+        await admin.from('stock_movements').insert(movePayload);
+      } catch {
+        if (movePayload.license_id) {
+          delete movePayload.license_id;
+          await admin.from('stock_movements').insert(movePayload);
+        }
       }
 
-      const { data: updatedProd, error: updErr } = await admin
-        .from('stock_products')
-        .update({ quantity_on_hand: Math.max(0, currentQty) })
-        .eq('id', product_id)
-        .select()
-        .single();
-
-      if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
-
-      return NextResponse.json({ success: true, product: updatedProd });
+      return NextResponse.json({ success: true, updatedQuantity: newQty });
     }
 
-    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+    return NextResponse.json({ error: 'Unknown stock action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

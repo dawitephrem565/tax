@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const category = searchParams.get('category');
+    const licenseId = searchParams.get('license_id');
 
     const admin = createAdminSupabase();
     let query = admin
@@ -30,9 +31,32 @@ export async function GET(req: NextRequest) {
     if (category) {
       query = query.eq('category', category);
     }
+    if (licenseId && licenseId !== 'all') {
+      try {
+        query = query.eq('license_id', licenseId);
+      } catch {
+        // column may not exist yet
+      }
+    }
 
-    const { data: files, error } = await query;
-    if (error) {
+    let { data: files, error } = await query;
+    if (error && error.message?.includes('license_id')) {
+      let fallbackQuery = admin
+        .from('file_boxes')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!ctx.isPlatformAdmin && companyId) fallbackQuery = fallbackQuery.eq('company_id', companyId);
+      if (category) fallbackQuery = fallbackQuery.eq('category', category);
+      const retry = await fallbackQuery;
+      if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 });
+      files = (retry.data || []).filter((f: any) => {
+        if (f.license_id) return f.license_id === licenseId;
+        if (f.notes?.includes(`[Lic: ${licenseId}]`)) return true;
+        if (licenseId === 'main' && !f.notes?.includes('[Lic: ')) return true;
+        return false;
+      });
+      error = null;
+    } else if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
@@ -75,44 +99,59 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const {
+      license_id,
       name,
       category,
       storage_path,
       filename,
-      mimetype,
-      file_size,
+      mimetype = 'application/octet-stream',
+      file_size = 0,
       notes,
     } = body;
 
-    if (!name || !category || !storage_path || !filename) {
-      return NextResponse.json(
-        { error: 'name, category, storage_path, and filename are required' },
-        { status: 400 }
-      );
+    if (!name || !category || !storage_path) {
+      return NextResponse.json({ error: 'Name, category and storage path are required' }, { status: 400 });
     }
 
     const admin = createAdminSupabase();
+
+    const insertPayload: Record<string, any> = {
+      company_id: companyId,
+      name,
+      category,
+      storage_path,
+      filename: filename || name,
+      mimetype,
+      file_size,
+      notes: license_id && license_id !== 'main' ? (notes ? `${notes} [Lic: ${license_id}]` : `[Lic: ${license_id}]`) : (notes || null),
+      created_by: ctx.userId,
+    };
+
+    if (license_id && license_id !== 'main') {
+      insertPayload.license_id = license_id;
+    }
+
+    let fileRecord: any = null;
     const { data, error } = await admin
       .from('file_boxes')
-      .insert({
-        company_id: companyId,
-        name,
-        category,
-        storage_path,
-        filename,
-        mimetype: mimetype || 'application/octet-stream',
-        file_size: file_size || 0,
-        notes: notes || null,
-        uploaded_by: ctx.userId,
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      if (insertPayload.license_id) {
+        delete insertPayload.license_id;
+        const retry = await admin.from('file_boxes').insert(insertPayload).select().single();
+        if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 });
+        fileRecord = retry.data;
+      } else {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+    } else {
+      fileRecord = data;
     }
 
-    return NextResponse.json({ success: true, file: data });
+    return NextResponse.json({ success: true, file: fileRecord }, { status: 201 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

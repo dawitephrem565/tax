@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
@@ -126,6 +126,77 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   };
 
   // ==========================================
+  // MULTI-LICENSE / ENTERPRISE ENTITY STATE
+  // (Managed strictly by Platform Super Admin;
+  //  Company Admins view & execute per assigned license)
+  // ==========================================
+  interface LicenseInfo {
+    id: string;
+    license_name: string;
+    license_number: string | null;
+    license_type: string;
+    is_primary: boolean;
+  }
+
+  const [companyLicenses, setCompanyLicenses] = useState<LicenseInfo[]>([
+    { id: 'main', license_name: 'Main License', license_number: null, license_type: 'Business License', is_primary: true },
+  ]);
+  const [activeLicenseId, setActiveLicenseId] = useState<string>('main');
+  const activeLicense = companyLicenses.find((l) => l.id === activeLicenseId) ?? companyLicenses[0];
+  const [perLicenseEmployees, setPerLicenseEmployees] = useState<Record<string, EmployeeRow[]>>({});
+  const [payrollLicenseSelector, setPayrollLicenseSelector] = useState(false);
+  const [payrollTargetLicenseId, setPayrollTargetLicenseId] = useState<string>('');
+
+  const fetchLicenses = async (): Promise<string> => {
+    try {
+      const token = getAuthToken();
+      const res = await fetch('/api/company/licenses', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.licenses && data.licenses.length > 0) {
+          setCompanyLicenses(data.licenses);
+          const primary = data.licenses.find((l: LicenseInfo) => l.is_primary) ?? data.licenses[0];
+          setActiveLicenseId(primary.id);
+          return primary.id;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load licenses:', err);
+    }
+    return 'main';
+  };
+
+  const loadAllDataForLicense = (licId: string) => {
+    fetchTreasury(licId);
+    fetchReceipts(licId);
+    fetchPayroll(licId);
+    fetchStock(licId);
+    fetchAgreements(licId);
+    fetchFileBoxes(undefined, licId);
+  };
+
+  const handleSelectLicense = (licId: string) => {
+    if (licId === activeLicenseId) return;
+    setActiveLicenseId(licId);
+    // Strict isolation: clear current loaded data so no bleeding across licenses occurs
+    setReceiptsList([]);
+    setFileBoxes([]);
+    setProducts([]);
+    if (perLicenseEmployees[licId]) {
+      setEmployees(perLicenseEmployees[licId]);
+    }
+    loadAllDataForLicense(licId);
+    toast.info(`Switched active view to license: ${companyLicenses.find(l => l.id === licId)?.license_name || licId}`);
+  };
+
+  // Get employees for a specific license (falls back to main employees list)
+  const getEmployeesForLicense = (licId: string): EmployeeRow[] => {
+    return perLicenseEmployees[licId] ?? employees;
+  };
+
+  // ==========================================
   // 1. TREASURY & BANK BALANCE STATE
   // ==========================================
   const [treasury, setTreasury] = useState({
@@ -142,10 +213,12 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const [bankDesc, setBankDesc] = useState('Initial Company Bank Opening Deposit');
   const [bankLoading, setBankLoading] = useState(false);
 
-  const fetchTreasury = async () => {
+  const fetchTreasury = async (licId?: string) => {
     try {
       const token = getAuthToken();
-      const res = await fetch('/api/company/treasury', {
+      const currentLic = licId ?? activeLicenseId;
+      const url = currentLic ? `/api/company/treasury?license_id=${encodeURIComponent(currentLic)}` : '/api/company/treasury';
+      const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
@@ -175,6 +248,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           action: bankAction,
           amount: bankAmount,
           description: bankDesc,
+          license_id: activeLicenseId,
         }),
       });
       const data = await res.json();
@@ -185,7 +259,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           : `Bank ${bankAction} recorded.`
       );
       setIsBankModalOpen(false);
-      fetchTreasury();
+      fetchTreasury(activeLicenseId);
     } catch (err: any) {
       handleAuthError(err, 'Error updating bank balance');
     } finally {
@@ -222,11 +296,13 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const calculatedWht = Math.round(safeUntaxed * (receiptWhtRate / 100) * 100) / 100;
   const calculatedTotal = Math.round((safeUntaxed + calculatedVat) * 100) / 100;
 
-  const fetchReceipts = async () => {
+  const fetchReceipts = async (licId?: string) => {
     setReceiptsLoading(true);
     try {
       const token = getAuthToken();
-      const res = await fetch('/api/company/receipts', {
+      const currentLic = licId ?? activeLicenseId;
+      const url = currentLic ? `/api/company/receipts?license_id=${encodeURIComponent(currentLic)}` : '/api/company/receipts';
+      const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
@@ -286,7 +362,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         setOcrEngine(json.engine ?? 'unknown');
         setConfidenceNotes(d.confidence_notes ?? []);
         const engineLabel = json.engine === 'vision-llm' ? 'Gemini Vision' : 'Tesseract Fallback';
-        toast.success(`${engineLabel}: FS ${d.fs_number || 'Ã¢â‚¬â€'}, Total ${d.total_amount?.toLocaleString() ?? 'Ã¢â‚¬â€'} ETB`);
+        toast.success(`${engineLabel}: FS ${d.fs_number || 'â€”'}, Total ${d.total_amount?.toLocaleString() ?? 'â€”'} ETB`);
       } else {
         toast.warning('Extraction returned no data. Fill fields manually.');
       }
@@ -330,6 +406,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
+          license_id: activeLicenseId,
           fs_number: fsNumber,
           machine_number: machineNumber,
           receipt_type: receiptType,
@@ -346,10 +423,11 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to register receipt');
 
-      toast.success('Receipt registered with duplicate detection check!');
+      toast.success(`Receipt registered for ${activeLicense?.license_name || 'License'} with duplicate detection check!`);
       setIsReceiptModalOpen(false);
-      fetchReceipts();
-      fetchTreasury(); // update treasury
+      handleClearReceipt();
+      fetchReceipts(activeLicenseId);
+      fetchTreasury(activeLicenseId); // update treasury
     } catch (err: any) {
       handleAuthError(err, 'Error registering receipt');
     }
@@ -480,10 +558,12 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const [lastCalculatedAt, setLastCalculatedAt] = useState<string | null>(null);
   const [payrollPosting, setPayrollPosting] = useState(false);
 
-  const fetchPayroll = async () => {
+  const fetchPayroll = async (licId?: string) => {
     try {
       const token = getAuthToken();
-      const res = await fetch('/api/company/payroll', {
+      const currentLic = licId ?? activeLicenseId;
+      const url = currentLic ? `/api/company/payroll?license_id=${encodeURIComponent(currentLic)}` : '/api/company/payroll';
+      const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
@@ -502,6 +582,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
             };
           });
           setEmployees(loadedRows);
+          setPerLicenseEmployees((prev) => ({ ...prev, [currentLic]: loadedRows }));
         }
       }
     } catch (err) {
@@ -510,21 +591,23 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   };
 
   const handleUpdateEmployee = (id: string, field: keyof EmployeeRow, val: any) => {
-    setEmployees((prev) =>
-      prev.map((emp) => {
+    setEmployees((prev) => {
+      const updated = prev.map((emp) => {
         if (emp.id !== id) return emp;
-        const updated = { ...emp, [field]: val };
-        const basic = Number(field === 'basic' ? val : updated.basic) || 0;
-        const workDays = Number(field === 'workDays' ? val : updated.workDays) || 30;
-        const overtime = Number(field === 'overtime' ? val : updated.overtime) || 0;
-        const taxableAllowance = Number(field === 'taxableAllowance' ? val : updated.taxableAllowance) || 0;
-        const transport = Number(field === 'transport' ? val : updated.transport) || 0;
-        const advance = Number(field === 'advance' ? val : updated.advance) || 0;
-        const otherDeductions = Number(field === 'otherDeductions' ? val : updated.otherDeductions) || 0;
+        const u = { ...emp, [field]: val };
+        const basic = Number(field === 'basic' ? val : u.basic) || 0;
+        const workDays = Number(field === 'workDays' ? val : u.workDays) || 30;
+        const overtime = Number(field === 'overtime' ? val : u.overtime) || 0;
+        const taxableAllowance = Number(field === 'taxableAllowance' ? val : u.taxableAllowance) || 0;
+        const transport = Number(field === 'transport' ? val : u.transport) || 0;
+        const advance = Number(field === 'advance' ? val : u.advance) || 0;
+        const otherDeductions = Number(field === 'otherDeductions' ? val : u.otherDeductions) || 0;
         const calc = computeEthiopianTax(basic, workDays, overtime, taxableAllowance, transport, advance, otherDeductions);
-        return { ...updated, ...calc };
-      })
-    );
+        return { ...u, ...calc };
+      });
+      setPerLicenseEmployees((p) => ({ ...p, [activeLicenseId]: updated }));
+      return updated;
+    });
   };
 
   const handleAddEmployeeRow = () => {
@@ -536,7 +619,11 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       basic: 10000,
       ...computeEthiopianTax(10000, 30),
     };
-    setEmployees((prev) => [...prev, newEmp]);
+    setEmployees((prev) => {
+      const updated = [...prev, newEmp];
+      setPerLicenseEmployees((p) => ({ ...p, [activeLicenseId]: updated }));
+      return updated;
+    });
   };
 
   const handleRemoveEmployeeRow = (id: string) => {
@@ -544,7 +631,11 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       toast.warning('Must keep at least one employee in payroll.');
       return;
     }
-    setEmployees((prev) => prev.filter((e) => e.id !== id));
+    setEmployees((prev) => {
+      const updated = prev.filter((e) => e.id !== id);
+      setPerLicenseEmployees((p) => ({ ...p, [activeLicenseId]: updated }));
+      return updated;
+    });
   };
 
   const handleImportStaffCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -581,7 +672,8 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
       if (newRows.length > 0) {
         setEmployees(newRows);
-        toast.success(`Imported ${newRows.length} staff records from CSV! Opening calculator...`);
+        setPerLicenseEmployees((p) => ({ ...p, [activeLicenseId]: newRows }));
+        toast.success(`Imported ${newRows.length} staff records from CSV for ${activeLicense?.license_name}! Opening calculator...`);
         setIsPayrollModalOpen(true);
       }
     };
@@ -616,6 +708,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
+          license_id: activeLicenseId,
           month: new Date().getMonth() + 1,
           year: new Date().getFullYear(),
           employees,
@@ -625,10 +718,11 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to post payroll');
 
-      toast.success(`Payroll processed! ${totalPayrollDeduction.toLocaleString()} ETB deducted from Company Bank Balance.`);
+      toast.success(`Payroll processed for ${activeLicense?.license_name || 'License'}! ${totalPayrollDeduction.toLocaleString()} ETB deducted from Company Bank Balance.`);
       setLastCalculatedAt(new Date().toISOString());
       setIsPayrollModalOpen(false);
-      fetchTreasury(); // Updates available bank balance
+      fetchPayroll(activeLicenseId);
+      fetchTreasury(activeLicenseId); // Updates available bank balance
     } catch (err: any) {
       handleAuthError(err, 'Error processing payroll');
     } finally {
@@ -660,103 +754,103 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const DEFAULT_PUBLISHED_AGREEMENTS = [
     {
       id: 'tpl-1',
-      title: 'Standard Ethiopian Employment Agreement (Ã¡â€¹Â¨Ã¡â€°â€¦Ã¡Å’Â¥Ã¡Ë†Â­ Ã¡â€¹ÂÃ¡Ë†Â Ã¡Ë†ÂµÃ¡Ë†ÂÃ¡Ë†ÂÃ¡Å ÂÃ¡â€°Âµ)',
+      title: 'Standard Ethiopian Employment Agreement (á‹¨á‰…áŒ¥áˆ­ á‹áˆ áˆµáˆáˆáŠá‰µ)',
       category: 'Labour / HR',
       desc: 'Compliant with Labour Proclamation No. 1156/2019. Covers employee job duties, probation period, monthly salary, 7% & 11% pension deductions, annual leave, and lawful termination terms.',
       updatedAt: '2026-11-15',
       html: `
 <h2 style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 16px;">
-  Ã¡â€¹Â¨Ã¡â€°â€¦Ã¡Å’Â¥Ã¡Ë†Â­ Ã¡â€¹ÂÃ¡Ë†Â Ã¡Ë†ÂµÃ¡Ë†ÂÃ¡Ë†ÂÃ¡Å ÂÃ¡â€°Âµ (EMPLOYMENT AGREEMENT)
+  á‹¨á‰…áŒ¥áˆ­ á‹áˆ áˆµáˆáˆáŠá‰µ (EMPLOYMENT AGREEMENT)
 </h2>
 <p style="margin-bottom: 12px;">
-  Ã¡â€¹Â­Ã¡Ë†â€¦ Ã¡â€¹Â¨Ã¡â€°â€¦Ã¡Å’Â¥Ã¡Ë†Â­ Ã¡â€¹ÂÃ¡Ë†Â Ã¡Ë†ÂµÃ¡Ë†ÂÃ¡Ë†ÂÃ¡Å ÂÃ¡â€°Âµ Ã¡â€°Â Ã¡Å Â Ã¡Ë†Â°Ã¡Ë†ÂªÃ¡â€¹Â <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> (Ã¡â€¹Â¨Ã¡Å’ÂÃ¡â€°Â¥Ã¡Ë†Â­ Ã¡Å Â¨Ã¡Ââ€¹Ã¡â€¹Â­ Ã¡Ë†ËœÃ¡Ë†Ë†Ã¡â€¹Â« Ã¡â€°ÂÃ¡Å’Â¥Ã¡Ë†Â­: <strong>${user?.tinNumber || '0012938475'}</strong>) Ã¡Å Â¥Ã¡Å â€œ Ã¡â€°Â Ã¡Ë†Â°Ã¡Ë†Â«Ã¡â€°Â°Ã¡Å â€ºÃ¡â€¹Â Ã¡Ë†ËœÃ¡Å Â«Ã¡Å Â¨Ã¡Ë†Â Ã¡â€°Â Ã¡Å Â Ã¡Ë†Â°Ã¡Ë†ÂªÃ¡Å â€œ Ã¡Ë†Â°Ã¡Ë†Â«Ã¡â€°Â°Ã¡Å â€º Ã¡Å’â€°Ã¡â€¹Â³Ã¡â€¹Â­ Ã¡Å Â Ã¡â€¹â€¹Ã¡Å’â€¦ Ã¡â€°ÂÃ¡Å’Â¥Ã¡Ë†Â­ 1156/2011 (Labour Proclamation No. 1156/2019) Ã¡Ë†ËœÃ¡Ë†Â°Ã¡Ë†Â¨Ã¡â€°Âµ Ã¡â€°Â°Ã¡â€¹ËœÃ¡Å’â€¹Ã¡Å’â€¦Ã¡â€°Â¶ Ã¡â€¹â€ºÃ¡Ë†Â¬ Ã¡â€°Â°Ã¡ÂË†Ã¡Ë†Â­Ã¡Ë†Å¸Ã¡Ë†ÂÃ¡ÂÂ¢
+  á‹­áˆ… á‹¨á‰…áŒ¥áˆ­ á‹áˆ áˆµáˆáˆáŠá‰µ á‰ áŠ áˆ°áˆªá‹ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> (á‹¨áŒá‰¥áˆ­ áŠ¨á‹á‹­ áˆ˜áˆˆá‹« á‰áŒ¥áˆ­: <strong>${user?.tinNumber || '0012938475'}</strong>) áŠ¥áŠ“ á‰ áˆ°áˆ«á‰°áŠ›á‹ áˆ˜áŠ«áŠ¨áˆ á‰ áŠ áˆ°áˆªáŠ“ áˆ°áˆ«á‰°áŠ› áŒ‰á‹³á‹­ áŠ á‹‹áŒ… á‰áŒ¥áˆ­ 1156/2011 (Labour Proclamation No. 1156/2019) áˆ˜áˆ°áˆ¨á‰µ á‰°á‹˜áŒ‹áŒ…á‰¶ á‹›áˆ¬ á‰°áˆáˆ­áˆŸáˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  1. Ã¡â€¹Â¨Ã¡Ë†ÂµÃ¡Ë†Â« Ã¡Ë†ËœÃ¡â€¹Â°Ã¡â€°Â¥ Ã¡Å Â¥Ã¡Å â€œ Ã¡Å Æ’Ã¡Ë†â€¹Ã¡ÂÅ Ã¡Å ÂÃ¡â€°Âµ (Job Position & Duties)
+  1. á‹¨áˆµáˆ« áˆ˜á‹°á‰¥ áŠ¥áŠ“ áŠƒáˆ‹áŠáŠá‰µ (Job Position & Duties)
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  Ã¡Ë†Â°Ã¡Ë†Â«Ã¡â€°Â°Ã¡Å â€ºÃ¡â€¹Â Ã¡â€°Â Ã¡â€°Â°Ã¡Ë†Â°Ã¡Å’Â Ã¡â€¹Â Ã¡â€¹Â¨Ã¡Ë†Â¥Ã¡Ë†Â« Ã¡â€¹ÂÃ¡Ë†Â­Ã¡â€¹ÂÃ¡Ë†Â­ Ã¡Ë†ËœÃ¡Ë†Â Ã¡Ë†Â¨Ã¡â€°Âµ Ã¡Ë†â„¢Ã¡â€¹Â«Ã¡â€¹Å  Ã¡Å’ÂÃ¡â€¹Â´Ã¡â€°Â³Ã¡â€¹ÂÃ¡Å â€¢ Ã¡â€°Â Ã¡â€°Â³Ã¡Ë†â€ºÃ¡Å ÂÃ¡Å ÂÃ¡â€°ÂµÃ¡ÂÂ£ Ã¡â€°Â Ã¡Å’Â¥Ã¡Ë†Â«Ã¡â€°Âµ Ã¡Å Â¥Ã¡Å â€œ Ã¡â€°Â Ã¡â€°ÂµÃ¡Å’â€¹Ã¡â€°Âµ Ã¡Ë†Ë†Ã¡Ë†â€ºÃ¡Å Â¨Ã¡Å â€œÃ¡â€¹Ë†Ã¡Å â€¢ Ã¡â€°Â°Ã¡Ë†ÂµÃ¡Ë†â€ºÃ¡Ë†ÂÃ¡â€°Â·Ã¡Ë†ÂÃ¡ÂÂ¢ Ã¡â€¹Â¨Ã¡Ë†ÂµÃ¡Ë†Â« Ã¡â€°Â¦Ã¡â€°Â³Ã¡â€¹Â Ã¡â€°Â Ã¡Å Â Ã¡â€¹Â²Ã¡Ë†Âµ Ã¡Å Â Ã¡â€°Â Ã¡â€°Â£ Ã¡â€¹â€¹Ã¡Å â€œ Ã¡Ë†Ëœ/Ã¡â€°Â¤Ã¡â€°Âµ Ã¡â€¹Â­Ã¡Ë†â€ Ã¡Å â€œÃ¡Ë†ÂÃ¡ÂÂ¢
+  áˆ°áˆ«á‰°áŠ›á‹ á‰ á‰°áˆ°áŒ á‹ á‹¨áˆ¥áˆ« á‹áˆ­á‹áˆ­ áˆ˜áˆ áˆ¨á‰µ áˆ™á‹«á‹Š áŒá‹´á‰³á‹áŠ• á‰ á‰³áˆ›áŠáŠá‰µá£ á‰ áŒ¥áˆ«á‰µ áŠ¥áŠ“ á‰ á‰µáŒ‹á‰µ áˆˆáˆ›áŠ¨áŠ“á‹ˆáŠ• á‰°áˆµáˆ›áˆá‰·áˆá¢ á‹¨áˆµáˆ« á‰¦á‰³á‹ á‰ áŠ á‹²áˆµ áŠ á‰ á‰£ á‹‹áŠ“ áˆ˜/á‰¤á‰µ á‹­áˆ†áŠ“áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  2. Ã¡â€¹Â°Ã¡Ë†ËœÃ¡â€¹Ë†Ã¡â€¹Â Ã¡Å Â¥Ã¡Å â€œ Ã¡â€¹Â¨Ã¡Å’ÂÃ¡â€°Â¥Ã¡Ë†Â­ Ã¡â€°Â°Ã¡â€°â‚¬Ã¡Å â€œÃ¡Ë†Â½ (Compensation & Statutory Deductions)
+  2. á‹°áˆ˜á‹ˆá‹ áŠ¥áŠ“ á‹¨áŒá‰¥áˆ­ á‰°á‰€áŠ“áˆ½ (Compensation & Statutory Deductions)
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  Ã¡â€¹Â¨Ã¡Ë†Â°Ã¡Ë†Â«Ã¡â€°Â°Ã¡Å â€ºÃ¡â€¹Â Ã¡â€¹Ë†Ã¡Ë†Â­Ã¡Ë†Æ’Ã¡â€¹Å  Ã¡Ë†ËœÃ¡Ë†Â°Ã¡Ë†Â¨Ã¡â€°Â³Ã¡â€¹Å  Ã¡â€¹Â°Ã¡Ë†ËœÃ¡â€¹Ë†Ã¡â€¹Â Ã¡â€°Â Ã¡Ë†â€¢Ã¡Å’Â Ã¡â€°Â Ã¡â€°Â°Ã¡â€¹Â°Ã¡Å ÂÃ¡Å’Ë†Ã¡Å’Ë†Ã¡â€¹Â Ã¡Ë†ËœÃ¡Ë†Â Ã¡Ë†Â¨Ã¡â€°Âµ Ã¡â€¹Â¨Ã¡Ë†Å¡Ã¡Å Â¨Ã¡ÂË†Ã¡Ë†Â Ã¡Ë†Â²Ã¡Ë†â€ Ã¡Å â€¢Ã¡ÂÂ£ Ã¡â€°Â 2017/2025 Ã¡â€¹Â¨Ã¡Å’Ë†Ã¡â€°Â¢ Ã¡Å’ÂÃ¡â€°Â¥Ã¡Ë†Â­ Ã¡Å Â Ã¡â€¹â€¹Ã¡Å’â€¦ Ã¡Ë†ËœÃ¡Ë†Â°Ã¡Ë†Â¨Ã¡â€°Âµ Ã¡â€°Â°Ã¡Å’Ë†Ã¡â€°Â¢Ã¡â€¹Â Ã¡â€¹Â¨Ã¡Ë†ÂµÃ¡Ë†Â« Ã¡Å’ÂÃ¡â€°Â¥Ã¡Ë†Â­ Ã¡Å Â¥Ã¡Å â€œ 7% Ã¡â€¹Â¨Ã¡Ë†Â°Ã¡Ë†Â«Ã¡â€°Â°Ã¡Å â€º Ã¡Å Â¥Ã¡Å â€¢Ã¡â€¹Â²Ã¡Ë†ÂÃ¡Ë†Â 11% Ã¡â€¹Â¨Ã¡Å Â Ã¡Ë†Â°Ã¡Ë†Âª Ã¡â€¹Â¨Ã¡Å’Â¡Ã¡Ë†Â¨Ã¡â€°Â³ Ã¡Ë†ËœÃ¡â€¹â€¹Ã¡Å’Â® Ã¡â€°Â°Ã¡â€°â‚¬Ã¡Å â€œÃ¡Ë†Â½ Ã¡â€°Â°Ã¡â€¹Â°Ã¡Ë†Â­Ã¡Å’Å½ Ã¡â€°Â Ã¡â€¹Ë†Ã¡â€°â€¦Ã¡â€°Â± Ã¡Ë†Ë†Ã¡Ë†ËœÃ¡Å â€¢Ã¡Å’ÂÃ¡Ë†ÂµÃ¡â€°Âµ Ã¡Å’Ë†Ã¡â€°Â¢ Ã¡â€¹Â­Ã¡â€¹Â°Ã¡Ë†Â¨Ã¡Å’â€¹Ã¡Ë†ÂÃ¡ÂÂ¢
+  á‹¨áˆ°áˆ«á‰°áŠ›á‹ á‹ˆáˆ­áˆƒá‹Š áˆ˜áˆ°áˆ¨á‰³á‹Š á‹°áˆ˜á‹ˆá‹ á‰ áˆ•áŒ á‰ á‰°á‹°áŠáŒˆáŒˆá‹ áˆ˜áˆ áˆ¨á‰µ á‹¨áˆšáŠ¨áˆáˆ áˆ²áˆ†áŠ•á£ á‰ 2017/2025 á‹¨áŒˆá‰¢ áŒá‰¥áˆ­ áŠ á‹‹áŒ… áˆ˜áˆ°áˆ¨á‰µ á‰°áŒˆá‰¢á‹ á‹¨áˆµáˆ« áŒá‰¥áˆ­ áŠ¥áŠ“ 7% á‹¨áˆ°áˆ«á‰°áŠ› áŠ¥áŠ•á‹²áˆáˆ 11% á‹¨áŠ áˆ°áˆª á‹¨áŒ¡áˆ¨á‰³ áˆ˜á‹‹áŒ® á‰°á‰€áŠ“áˆ½ á‰°á‹°áˆ­áŒŽ á‰ á‹ˆá‰…á‰± áˆˆáˆ˜áŠ•áŒáˆµá‰µ áŒˆá‰¢ á‹­á‹°áˆ¨áŒ‹áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  3. Ã¡â€¹Â¨Ã¡â€¹ÂÃ¡Ë†Â Ã¡Ââ‚¬Ã¡Å â€œÃ¡â€°Â Ã¡â€°Âµ Ã¡Å’Å Ã¡â€¹Å“ Ã¡Å Â¥Ã¡Å â€œ Ã¡Ë†â€ºÃ¡â€°â€¹Ã¡Ë†Â¨Ã¡Å’Â¥ (Term & Termination)
+  3. á‹¨á‹áˆ á€áŠ“á‰ á‰µ áŒŠá‹œ áŠ¥áŠ“ áˆ›á‰‹áˆ¨áŒ¥ (Term & Termination)
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  Ã¡â€¹Â­Ã¡Ë†â€¦ Ã¡â€¹ÂÃ¡Ë†Â Ã¡Ë†â€¹Ã¡Ë†ÂÃ¡â€°Â°Ã¡â€¹Ë†Ã¡Ë†Â°Ã¡Å Â Ã¡Å’Å Ã¡â€¹Å“ Ã¡â€¹Â¨Ã¡Ââ‚¬Ã¡Å â€œ Ã¡Ë†Â²Ã¡Ë†â€ Ã¡Å â€¢ Ã¡â€°Â Ã¡Å Â Ã¡â€¹â€¹Ã¡Å’â€¦ Ã¡â€°ÂÃ¡Å’Â¥Ã¡Ë†Â­ 1156/2011 Ã¡â€°Â Ã¡â€°Â°Ã¡â€¹Â°Ã¡Å ÂÃ¡Å’Ë†Ã¡Å’â€°Ã¡â€°Âµ Ã¡â€¹ÂµÃ¡Å â€¢Ã¡Å’â€¹Ã¡Å’Å’Ã¡â€¹Å½Ã¡â€°Â½ Ã¡Ë†ËœÃ¡Ë†Â Ã¡Ë†Â¨Ã¡â€°Âµ Ã¡â€°Â¥Ã¡â€°Â» Ã¡â€¹Â­Ã¡â€°â€¹Ã¡Ë†Â¨Ã¡Å’Â£Ã¡Ë†ÂÃ¡ÂÂ¢
+  á‹­áˆ… á‹áˆ áˆ‹áˆá‰°á‹ˆáˆ°áŠ áŒŠá‹œ á‹¨á€áŠ“ áˆ²áˆ†áŠ• á‰ áŠ á‹‹áŒ… á‰áŒ¥áˆ­ 1156/2011 á‰ á‰°á‹°áŠáŒˆáŒ‰á‰µ á‹µáŠ•áŒ‹áŒŒá‹Žá‰½ áˆ˜áˆ áˆ¨á‰µ á‰¥á‰» á‹­á‰‹áˆ¨áŒ£áˆá¢
 </p>
 <br/>
 <div style="display: flex; justify-content: space-between; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
-  <div><strong>Ã¡Å Â Ã¡Ë†Â°Ã¡Ë†Âª (Employer):</strong> ______________________</div>
-  <div><strong>Ã¡Ë†Â°Ã¡Ë†Â«Ã¡â€°Â°Ã¡Å â€º (Employee):</strong> ______________________</div>
+  <div><strong>áŠ áˆ°áˆª (Employer):</strong> ______________________</div>
+  <div><strong>áˆ°áˆ«á‰°áŠ› (Employee):</strong> ______________________</div>
 </div>
       `,
     },
     {
       id: 'tpl-2',
-      title: 'Commercial Property & Office Lease Agreement (Ã¡â€¹Â¨Ã¡â€°Â¢Ã¡Ë†Â® Ã¡Å ÂªÃ¡Ë†Â«Ã¡â€¹Â­ Ã¡â€¹ÂÃ¡Ë†Â)',
+      title: 'Commercial Property & Office Lease Agreement (á‹¨á‰¢áˆ® áŠªáˆ«á‹­ á‹áˆ)',
       category: 'Real Estate / Leases',
       desc: 'Commercial rental agreement for premises in Addis Ababa. Includes monthly rental rate, security deposit, utility charges, maintenance obligations, and tax withholding compliance.',
       updatedAt: '2026-11-10',
       html: `
 <h2 style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 16px;">
-  Ã¡â€¹Â¨Ã¡â€°Â¢Ã¡Ë†Â®Ã¡Å â€œ Ã¡â€¹Â¨Ã¡Å â€¢Ã¡Å’ÂÃ¡â€¹Âµ Ã¡â€°Â¤Ã¡â€°Âµ Ã¡Å ÂªÃ¡Ë†Â«Ã¡â€¹Â­ Ã¡â€¹ÂÃ¡Ë†Â Ã¡Ë†ÂµÃ¡Ë†ÂÃ¡Ë†ÂÃ¡Å ÂÃ¡â€°Âµ (COMMERCIAL LEASE AGREEMENT)
+  á‹¨á‰¢áˆ®áŠ“ á‹¨áŠ•áŒá‹µ á‰¤á‰µ áŠªáˆ«á‹­ á‹áˆ áˆµáˆáˆáŠá‰µ (COMMERCIAL LEASE AGREEMENT)
 </h2>
 <p style="margin-bottom: 12px;">
-  Ã¡â€¹Â­Ã¡Ë†â€¦ Ã¡â€¹Â¨Ã¡Å ÂªÃ¡Ë†Â«Ã¡â€¹Â­ Ã¡â€¹ÂÃ¡Ë†Â Ã¡Ë†ÂµÃ¡Ë†ÂÃ¡Ë†ÂÃ¡Å ÂÃ¡â€°Âµ Ã¡â€°Â Ã¡Å Â Ã¡Å Â¨Ã¡Ë†Â«Ã¡â€¹Â­ Ã¡Å Â¥Ã¡Å â€œ Ã¡â€°Â Ã¡â€°Â°Ã¡Å Â¨Ã¡Ë†Â«Ã¡â€¹Â­ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> (TIN: <strong>${user?.tinNumber || '0012938475'}</strong>) Ã¡Ë†ËœÃ¡Å Â«Ã¡Å Â¨Ã¡Ë†Â Ã¡â€°Â Ã¡Å Â Ã¡â€¹Â²Ã¡Ë†Âµ Ã¡Å Â Ã¡â€°Â Ã¡â€°Â£ Ã¡Å Â¨Ã¡â€°Â°Ã¡Ë†â€º Ã¡â€°Â°Ã¡â€¹Â°Ã¡Ë†Â­Ã¡Å’â€œÃ¡Ë†ÂÃ¡ÂÂ¢
+  á‹­áˆ… á‹¨áŠªáˆ«á‹­ á‹áˆ áˆµáˆáˆáŠá‰µ á‰ áŠ áŠ¨áˆ«á‹­ áŠ¥áŠ“ á‰ á‰°áŠ¨áˆ«á‹­ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> (TIN: <strong>${user?.tinNumber || '0012938475'}</strong>) áˆ˜áŠ«áŠ¨áˆ á‰ áŠ á‹²áˆµ áŠ á‰ á‰£ áŠ¨á‰°áˆ› á‰°á‹°áˆ­áŒ“áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  1. Ã¡â€¹Â¨Ã¡â€°Â°Ã¡Å Â¨Ã¡Ë†Â«Ã¡â€¹Â¨Ã¡â€¹Â Ã¡Å â€¢Ã¡â€°Â¥Ã¡Ë†Â¨Ã¡â€°Âµ Ã¡Å Â¥Ã¡Å â€œ Ã¡â€¹Â¨Ã¡Å ÂªÃ¡Ë†Â«Ã¡â€¹Â­ Ã¡â€¹â€¹Ã¡Å’â€¹
+  1. á‹¨á‰°áŠ¨áˆ«á‹¨á‹ áŠ•á‰¥áˆ¨á‰µ áŠ¥áŠ“ á‹¨áŠªáˆ«á‹­ á‹‹áŒ‹
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  Ã¡â€°Â°Ã¡Å Â¨Ã¡Ë†Â«Ã¡â€¹Â© Ã¡â€¹Â¨Ã¡â€°Â°Ã¡Å’Â Ã¡â€°â‚¬Ã¡Ë†Â°Ã¡â€¹ÂÃ¡Å â€¢ Ã¡â€¹Â¨Ã¡Å â€¢Ã¡Å’ÂÃ¡â€¹Âµ Ã¡â€°Â¢Ã¡Ë†Â® Ã¡â€°Â Ã¡â€¹Ë†Ã¡Ë†Â­ Ã¡â€¹Â¨Ã¡â€°Â°Ã¡Ë†ÂµÃ¡Ë†â€ºÃ¡Ë†â„¢Ã¡â€°Â Ã¡â€°ÂµÃ¡Å â€¢ Ã¡Å ÂªÃ¡Ë†Â«Ã¡â€¹Â­ Ã¡â€°Â Ã¡â€¹Â¨Ã¡â€¹Ë†Ã¡Ë†Â© Ã¡Ë†ËœÃ¡Å’â‚¬Ã¡Ë†ËœÃ¡Ë†ÂªÃ¡â€¹Â« 5 Ã¡â€°â‚¬Ã¡Å â€œÃ¡â€°Âµ Ã¡â€¹ÂÃ¡Ë†ÂµÃ¡Å’Â¥ Ã¡Ë†Ë†Ã¡Ë†ËœÃ¡Å Â­Ã¡ÂË†Ã¡Ë†Â Ã¡â€°Â°Ã¡Ë†ÂµÃ¡Ë†â€ºÃ¡Ë†ÂÃ¡â€°Â·Ã¡Ë†ÂÃ¡ÂÂ¢ Ã¡â€°Â°Ã¡Å Â¨Ã¡Ë†Â«Ã¡â€¹Â© Ã¡â€°Â Ã¡Ë†â€¢Ã¡Å’Â Ã¡â€¹Â¨Ã¡â€°Â°Ã¡Å’Â£Ã¡Ë†Ë†Ã¡â€¹ÂÃ¡Å â€¢ Ã¡â€¹Â¨Ã¡Å ÂªÃ¡Ë†Â«Ã¡â€¹Â­ Ã¡Å’Ë†Ã¡â€°Â¢ Ã¡Å’ÂÃ¡â€°Â¥Ã¡Ë†Â­ Ã¡â€°Â°Ã¡â€°â‚¬Ã¡Å â€œÃ¡Ë†Â½ (Withholding Tax) Ã¡â€°Â Ã¡Ë†â€ºÃ¡â€¹ÂµÃ¡Ë†Â¨Ã¡Å’Â Ã¡â€¹Â°Ã¡Ë†Â¨Ã¡Ë†Â°Ã¡Å Â Ã¡â€¹Â­Ã¡Ë†Â°Ã¡Å’Â£Ã¡Ë†ÂÃ¡ÂÂ¢
+  á‰°áŠ¨áˆ«á‹© á‹¨á‰°áŒ á‰€áˆ°á‹áŠ• á‹¨áŠ•áŒá‹µ á‰¢áˆ® á‰ á‹ˆáˆ­ á‹¨á‰°áˆµáˆ›áˆ™á‰ á‰µáŠ• áŠªáˆ«á‹­ á‰ á‹¨á‹ˆáˆ© áˆ˜áŒ€áˆ˜áˆªá‹« 5 á‰€áŠ“á‰µ á‹áˆµáŒ¥ áˆˆáˆ˜áŠ­áˆáˆ á‰°áˆµáˆ›áˆá‰·áˆá¢ á‰°áŠ¨áˆ«á‹© á‰ áˆ•áŒ á‹¨á‰°áŒ£áˆˆá‹áŠ• á‹¨áŠªáˆ«á‹­ áŒˆá‰¢ áŒá‰¥áˆ­ á‰°á‰€áŠ“áˆ½ (Withholding Tax) á‰ áˆ›á‹µáˆ¨áŒ á‹°áˆ¨áˆ°áŠ á‹­áˆ°áŒ£áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  2. Ã¡â€¹Â¨Ã¡â€¹ÂÃ¡Ë†Â Ã¡â€°â€ Ã¡â€¹Â­Ã¡â€°Â³
+  2. á‹¨á‹áˆ á‰†á‹­á‰³
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  Ã¡â€¹Â­Ã¡Ë†â€¦ Ã¡â€¹ÂÃ¡Ë†Â Ã¡Ë†Ë†Ã¡Å Â Ã¡Å â€¢Ã¡â€¹Âµ (1) Ã¡â€¹â€œÃ¡Ë†ËœÃ¡â€°Âµ Ã¡â€¹Â¨Ã¡Ââ‚¬Ã¡Å â€œ Ã¡Ë†â€ Ã¡Å â€“ Ã¡â€°Â Ã¡Ë†ÂÃ¡Ë†Ë†Ã¡â€°Â±Ã¡Ë†Â Ã¡â€¹Ë†Ã¡Å’Ë†Ã¡Å â€“Ã¡â€°Â½ Ã¡â€¹Â¨Ã¡Å’â€¹Ã¡Ë†Â« Ã¡Ë†ÂµÃ¡Ë†ÂÃ¡Ë†ÂÃ¡Å ÂÃ¡â€°Âµ Ã¡Ë†Å Ã¡â€°Â³Ã¡â€¹Â°Ã¡Ë†Âµ Ã¡â€¹Â­Ã¡â€°Â½Ã¡Ë†â€¹Ã¡Ë†ÂÃ¡ÂÂ¢
+  á‹­áˆ… á‹áˆ áˆˆáŠ áŠ•á‹µ (1) á‹“áˆ˜á‰µ á‹¨á€áŠ“ áˆ†áŠ– á‰ áˆáˆˆá‰±áˆ á‹ˆáŒˆáŠ–á‰½ á‹¨áŒ‹áˆ« áˆµáˆáˆáŠá‰µ áˆŠá‰³á‹°áˆµ á‹­á‰½áˆ‹áˆá¢
 </p>
 <br/>
 <div style="display: flex; justify-content: space-between; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
-  <div><strong>Ã¡Å Â Ã¡Å Â¨Ã¡Ë†Â«Ã¡â€¹Â­ (Landlord):</strong> ______________________</div>
-  <div><strong>Ã¡â€°Â°Ã¡Å Â¨Ã¡Ë†Â«Ã¡â€¹Â­ (Tenant):</strong> ______________________</div>
+  <div><strong>áŠ áŠ¨áˆ«á‹­ (Landlord):</strong> ______________________</div>
+  <div><strong>á‰°áŠ¨áˆ«á‹­ (Tenant):</strong> ______________________</div>
 </div>
       `,
     },
     {
       id: 'tpl-3',
-      title: 'Equipment & Goods Supply Agreement (Ã¡â€¹Â¨Ã¡â€¹â€¢Ã¡â€°Æ’Ã¡Å â€œ Ã¡Ë†ËœÃ¡Ë†Â£Ã¡Ë†ÂªÃ¡â€¹Â«Ã¡â€¹Å½Ã¡â€°Â½ Ã¡Å Â Ã¡â€°â€¦Ã¡Ë†Â­Ã¡â€°Â¦Ã¡â€°Âµ Ã¡â€¹ÂÃ¡Ë†Â)',
+      title: 'Equipment & Goods Supply Agreement (á‹¨á‹•á‰ƒáŠ“ áˆ˜áˆ£áˆªá‹«á‹Žá‰½ áŠ á‰…áˆ­á‰¦á‰µ á‹áˆ)',
       category: 'Procurement / Stock',
       desc: 'Goods procurement terms covering quality inspection, VAT 15% invoicing, delivery timelines, and 3% withholding tax compliance on transactions above 10,000 ETB.',
       updatedAt: '2026-11-08',
       html: `
 <h2 style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 16px;">
-  Ã¡â€¹Â¨Ã¡â€¹â€¢Ã¡â€°Æ’Ã¡Å â€œ Ã¡Ë†ËœÃ¡Ë†Â£Ã¡Ë†ÂªÃ¡â€¹Â«Ã¡â€¹Å½Ã¡â€°Â½ Ã¡Å Â Ã¡â€°â€¦Ã¡Ë†Â­Ã¡â€°Â¦Ã¡â€°Âµ Ã¡â€¹ÂÃ¡Ë†Â (GOODS SUPPLY AGREEMENT)
+  á‹¨á‹•á‰ƒáŠ“ áˆ˜áˆ£áˆªá‹«á‹Žá‰½ áŠ á‰…áˆ­á‰¦á‰µ á‹áˆ (GOODS SUPPLY AGREEMENT)
 </h2>
 <p style="margin-bottom: 12px;">
-  Ã¡â€¹Â­Ã¡Ë†â€¦ Ã¡â€¹Â¨Ã¡Å Â Ã¡â€°â€¦Ã¡Ë†Â­Ã¡â€°Â¦Ã¡â€°Âµ Ã¡â€¹ÂÃ¡Ë†Â Ã¡â€°Â Ã¡Å Â Ã¡â€°â€¦Ã¡Ë†Â«Ã¡â€°Â¢ Ã¡Å Â¥Ã¡Å â€œ Ã¡â€°Â Ã¡Å’Ë†Ã¡â€¹Â¢ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> Ã¡Ë†ËœÃ¡Å Â«Ã¡Å Â¨Ã¡Ë†Â Ã¡â€°Â°Ã¡â€¹Â°Ã¡Ë†Â­Ã¡Å’â€œÃ¡Ë†ÂÃ¡ÂÂ¢
+  á‹­áˆ… á‹¨áŠ á‰…áˆ­á‰¦á‰µ á‹áˆ á‰ áŠ á‰…áˆ«á‰¢ áŠ¥áŠ“ á‰ áŒˆá‹¢ <strong>${user?.fullName || 'Amis Financial Enterprise'}</strong> áˆ˜áŠ«áŠ¨áˆ á‰°á‹°áˆ­áŒ“áˆá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  1. Ã¡â€¹Â¨Ã¡â€¹â€¢Ã¡â€°Æ’Ã¡â€¹Â Ã¡â€¹â€œÃ¡â€¹Â­Ã¡Å ÂÃ¡â€°Âµ Ã¡Å Â¥Ã¡Å â€œ Ã¡â€¹Â¨Ã¡Å’Â¥Ã¡Ë†Â«Ã¡â€°Âµ Ã¡â€¹Â°Ã¡Ë†Â¨Ã¡Å’Æ’
+  1. á‹¨á‹•á‰ƒá‹ á‹“á‹­áŠá‰µ áŠ¥áŠ“ á‹¨áŒ¥áˆ«á‰µ á‹°áˆ¨áŒƒ
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  Ã¡Å Â Ã¡â€°â€¦Ã¡Ë†Â«Ã¡â€°Â¢Ã¡â€¹Â Ã¡â€°Â Ã¡Å’ÂÃ¡â€¹Â¢ Ã¡â€°ÂµÃ¡â€¹â€¢Ã¡â€¹â€ºÃ¡â€¹â„¢ (Purchase Order) Ã¡Ë†â€¹Ã¡â€¹Â­ Ã¡â€¹Â¨Ã¡â€°Â°Ã¡Ë†ËœÃ¡Ë†Ë†Ã¡Å Â¨Ã¡â€°Â±Ã¡â€°ÂµÃ¡Å â€¢ Ã¡Å Â¥Ã¡â€°Æ’Ã¡â€¹Å½Ã¡â€°Â½ Ã¡â€°Â Ã¡â€°Â°Ã¡Å’Ë†Ã¡â€°Â¢Ã¡â€¹Â Ã¡Å’Â¥Ã¡Ë†Â«Ã¡â€°Âµ Ã¡Å Â¥Ã¡Å â€œ Ã¡Ë†ËœÃ¡Å’Â Ã¡Å â€¢ Ã¡â€°Â Ã¡â€¹Ë†Ã¡â€°â€¦Ã¡â€°Â± Ã¡â€¹Â¨Ã¡Ë†â€ºÃ¡Ë†ÂµÃ¡Ë†Â¨Ã¡Å Â¨Ã¡â€°Â¥ Ã¡Å Æ’Ã¡Ë†â€¹Ã¡ÂÅ Ã¡Å ÂÃ¡â€°Âµ Ã¡Å Â Ã¡Ë†Ë†Ã¡â€°Â Ã¡â€°ÂµÃ¡ÂÂ¢
+  áŠ á‰…áˆ«á‰¢á‹ á‰ áŒá‹¢ á‰µá‹•á‹›á‹™ (Purchase Order) áˆ‹á‹­ á‹¨á‰°áˆ˜áˆˆáŠ¨á‰±á‰µáŠ• áŠ¥á‰ƒá‹Žá‰½ á‰ á‰°áŒˆá‰¢á‹ áŒ¥áˆ«á‰µ áŠ¥áŠ“ áˆ˜áŒ áŠ• á‰ á‹ˆá‰…á‰± á‹¨áˆ›áˆµáˆ¨áŠ¨á‰¥ áŠƒáˆ‹áŠáŠá‰µ áŠ áˆˆá‰ á‰µá¢
 </p>
 <h3 style="font-size: 14px; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">
-  2. Ã¡Å Â­Ã¡ÂÂÃ¡â€¹Â« Ã¡Å Â¥Ã¡Å â€œ Ã¡â€¹Â¨Ã¡â€°Â³Ã¡Å Â­Ã¡Ë†Âµ Ã¡â€¹Â°Ã¡Ë†Â¨Ã¡Ë†Â°Ã¡Å Â
+  2. áŠ­áá‹« áŠ¥áŠ“ á‹¨á‰³áŠ­áˆµ á‹°áˆ¨áˆ°áŠ
 </h3>
 <p style="margin-bottom: 12px; color: #4b5563;">
-  Ã¡Å Â­Ã¡ÂÂÃ¡â€¹Â«Ã¡â€¹Â Ã¡â€¹Â¨Ã¡Ë†Å¡Ã¡ÂË†Ã¡Å’Â¸Ã¡Ë†ËœÃ¡â€¹Â Ã¡Ë†â€¢Ã¡Å’â€¹Ã¡â€¹Å  Ã¡â€¹Â¨Ã¡Å’Ë†Ã¡Å â€¢Ã¡â€¹ËœÃ¡â€°Â¥ Ã¡Ë†ËœÃ¡â€°â‚¬Ã¡â€°Â Ã¡â€¹Â« Ã¡â€¹Â¨Ã¡Å’Â¥Ã¡Ë†Â¬ Ã¡Å’Ë†Ã¡Å â€¢Ã¡â€¹ËœÃ¡â€°Â¥ Ã¡Ë†ËœÃ¡Ë†ËœÃ¡â€¹ÂÃ¡Å’Ë†Ã¡â€°Â¢Ã¡â€¹Â« Ã¡Ë†â€ºÃ¡Ë†Â½Ã¡Å â€¢ Ã¡â€¹Â°Ã¡Ë†Â¨Ã¡Ë†Â°Ã¡Å Â (Fiscal Cash Register Receipt) Ã¡Ë†Â²Ã¡â€°â‚¬Ã¡Ë†Â­Ã¡â€°Â¥ Ã¡â€°Â¥Ã¡â€°Â» Ã¡Å ÂÃ¡â€¹ÂÃ¡ÂÂ¢ 15% Ã¡â€°Â°Ã¡Å’Â¨Ã¡Ë†â€ºÃ¡Ë†Âª Ã¡Å Â¥Ã¡Ë†Â´Ã¡â€°Âµ Ã¡â€°Â³Ã¡Å Â­Ã¡Ë†Âµ (VAT) Ã¡Å Â¥Ã¡Å â€œ 3% Ã¡â€¹Â¨Ã¡â€¹Å Ã¡â€¹ÂÃ¡Ë†â€ Ã¡Ë†ÂÃ¡â€¹Â²Ã¡Å â€¢Ã¡Å’Â Ã¡â€°Â³Ã¡Å Â­Ã¡Ë†Âµ Ã¡â€°Â Ã¡Ë†â€¢Ã¡Å’â€° Ã¡Ë†ËœÃ¡Ë†Â Ã¡Ë†Â¨Ã¡â€°Âµ Ã¡â€°Â°Ã¡ÂË†Ã¡Å’Â»Ã¡Ë†Å¡ Ã¡â€¹Â­Ã¡Ë†â€ Ã¡Å â€œÃ¡Ë†ÂÃ¡ÂÂ¢
+  áŠ­áá‹«á‹ á‹¨áˆšáˆáŒ¸áˆ˜á‹ áˆ•áŒ‹á‹Š á‹¨áŒˆáŠ•á‹˜á‰¥ áˆ˜á‰€á‰ á‹« á‹¨áŒ¥áˆ¬ áŒˆáŠ•á‹˜á‰¥ áˆ˜áˆ˜á‹áŒˆá‰¢á‹« áˆ›áˆ½áŠ• á‹°áˆ¨áˆ°áŠ (Fiscal Cash Register Receipt) áˆ²á‰€áˆ­á‰¥ á‰¥á‰» áŠá‹á¢ 15% á‰°áŒ¨áˆ›áˆª áŠ¥áˆ´á‰µ á‰³áŠ­áˆµ (VAT) áŠ¥áŠ“ 3% á‹¨á‹Šá‹áˆ†áˆá‹²áŠ•áŒ á‰³áŠ­áˆµ á‰ áˆ•áŒ‰ áˆ˜áˆ áˆ¨á‰µ á‰°áˆáŒ»áˆš á‹­áˆ†áŠ“áˆá¢
 </p>
 <br/>
 <div style="display: flex; justify-content: space-between; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
-  <div><strong>Ã¡Å Â Ã¡â€°â€¦Ã¡Ë†Â«Ã¡â€°Â¢ (Supplier):</strong> ______________________</div>
-  <div><strong>Ã¡Å’Ë†Ã¡â€¹Â¢ (Buyer):</strong> ______________________</div>
+  <div><strong>áŠ á‰…áˆ«á‰¢ (Supplier):</strong> ______________________</div>
+  <div><strong>áŒˆá‹¢ (Buyer):</strong> ______________________</div>
 </div>
       `,
     },
@@ -779,10 +873,12 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const [editorSaving, setEditorSaving] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
 
-  const fetchAgreements = async () => {
+  const fetchAgreements = async (licId?: string) => {
     try {
       const token = getAuthToken();
-      const res = await fetch('/api/company/agreements', {
+      const currentLic = licId ?? activeLicenseId;
+      const url = currentLic ? `/api/company/agreements?license_id=${encodeURIComponent(currentLic)}` : '/api/company/agreements';
+      const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
@@ -829,12 +925,14 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           bodyHtml: content,
           templateId: activeAgreement.templateId,
           agreementId: activeAgreement.id,
+          license_id: activeLicenseId,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save agreement');
-      toast.success('Agreement updated with rich Word formatting!');
+      toast.success(`Agreement updated for ${activeLicense?.license_name || 'License'} with rich Word formatting!`);
+      fetchAgreements(activeLicenseId);
     } catch (err: any) {
       handleAuthError(err, 'Error saving agreement');
     } finally {
@@ -871,10 +969,14 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const [fbUploadFile, setFbUploadFile] = useState<File | null>(null);
   const [fbUploading, setFbUploading] = useState(false);
 
-  const fetchFileBoxes = async (cat?: string) => {
+  const fetchFileBoxes = async (cat?: string, licId?: string) => {
     try {
       const token = getAuthToken();
-      const url = cat ? `/api/company/fileboxes?category=${cat}` : '/api/company/fileboxes';
+      const currentLic = licId ?? activeLicenseId;
+      const params = new URLSearchParams();
+      if (cat) params.set('category', cat);
+      if (currentLic) params.set('license_id', currentLic);
+      const url = `/api/company/fileboxes${params.toString() ? `?${params.toString()}` : ''}`;
       const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -923,18 +1025,19 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           mimetype: fbUploadFile.type || 'application/octet-stream',
           file_size: fbUploadFile.size,
           notes: fbUploadNotes,
+          license_id: activeLicenseId,
         }),
       });
 
       const saveJson = await saveRes.json();
       if (!saveRes.ok) throw new Error(saveJson.error || 'Failed to save to File Box');
 
-      toast.success(`Document uploaded to ${FILE_BOX_CATEGORIES.find(c => c.key === fbUploadCat)?.title || 'File Box'}!`);
+      toast.success(`Document uploaded to ${FILE_BOX_CATEGORIES.find(c => c.key === fbUploadCat)?.title || 'File Box'} for ${activeLicense?.license_name}!`);
       setIsFileBoxModalOpen(false);
       setFbUploadFile(null);
       setFbUploadName('');
       setFbUploadNotes('');
-      fetchFileBoxes(selectedFileBoxCat || undefined);
+      fetchFileBoxes(selectedFileBoxCat || undefined, activeLicenseId);
     } catch (err: any) {
       handleAuthError(err, 'Error uploading to File Box');
     } finally {
@@ -971,15 +1074,17 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [prodImageUploading, setProdImageUploading] = useState(false);
 
-  const fetchStock = async () => {
+  const fetchStock = async (licId?: string) => {
     try {
       const token = getAuthToken();
-      const res = await fetch('/api/company/stock', {
+      const currentLic = licId ?? activeLicenseId;
+      const url = currentLic ? `/api/company/stock?license_id=${encodeURIComponent(currentLic)}` : '/api/company/stock';
+      const res = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.products && data.products.length > 0) {
+        if (data.products) {
           setProducts(data.products);
         }
         if (data.kpis) setStockKpis(data.kpis);
@@ -1013,18 +1118,19 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           cost_price: newProdCost,
           unit_price: newProdSale,
           quantity_on_hand: newProdQty,
+          license_id: activeLicenseId,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to add product');
 
-      toast.success(`Product "${newProdName}" added to stock inventory!`);
+      toast.success(`Product "${newProdName}" added to ${activeLicense?.license_name || 'Stock'}!`);
       setIsNewProductModalOpen(false);
       setNewProdName('');
       setNewProdCode('');
       setNewProdImage('');
-      fetchStock();
+      fetchStock(activeLicenseId);
     } catch (err: any) {
       handleAuthError(err, 'Error adding product');
     } finally {
@@ -1071,6 +1177,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           movement_type: adjustType,
           quantity: adjustQty,
           reference: `${adjustType.toUpperCase()} - Manual adjustment`,
+          license_id: activeLicenseId,
         }),
       });
 
@@ -1079,112 +1186,24 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
       toast.success('Stock movement recorded and on-hand balance updated!');
       setIsStockAdjustModalOpen(false);
-      fetchStock();
+      fetchStock(activeLicenseId);
     } catch (err: any) {
       handleAuthError(err, 'Error adjusting stock');
     }
   };
 
-  // ==========================================
-  // 7. MULTI-LICENSE / COMPANY SELECTOR STATE
-  // ==========================================
-  interface LicenseInfo {
-    id: string;
-    license_name: string;
-    license_number: string | null;
-    license_type: string;
-    is_primary: boolean;
-  }
-
-  const [companyLicenses, setCompanyLicenses] = useState<LicenseInfo[]>([
-    { id: 'main', license_name: 'Main License', license_number: null, license_type: 'Business License', is_primary: true },
-  ]);
-  const [activeLicenseId, setActiveLicenseId] = useState<string>('main');
-  const [isAddLicenseModalOpen, setIsAddLicenseModalOpen] = useState(false);
-  const [newLicenseName, setNewLicenseName] = useState('');
-  const [newLicenseNumber, setNewLicenseNumber] = useState('');
-  const [newLicenseType, setNewLicenseType] = useState('Business License');
-
-  const activeLicense = companyLicenses.find((l) => l.id === activeLicenseId) ?? companyLicenses[0];
-
-  // Per-license payroll: map licenseId â†’ EmployeeRow[]
-  const [perLicenseEmployees, setPerLicenseEmployees] = useState<Record<string, EmployeeRow[]>>({});
-  const [payrollLicenseSelector, setPayrollLicenseSelector] = useState(false);
-  const [payrollTargetLicenseId, setPayrollTargetLicenseId] = useState<string>('');
-
-  const fetchLicenses = async () => {
-    try {
-      const token = getAuthToken();
-      const res = await fetch('/api/company/licenses', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.licenses && data.licenses.length > 0) {
-          setCompanyLicenses(data.licenses);
-          const primary = data.licenses.find((l: LicenseInfo) => l.is_primary) ?? data.licenses[0];
-          setActiveLicenseId(primary.id);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load licenses:', err);
-    }
-  };
-
-  const handleAddLicenseSubmit = async () => {
-    if (!newLicenseName.trim()) {
-      toast.error('License name is required.');
-      return;
-    }
-    try {
-      const token = getAuthToken();
-      const res = await fetch('/api/company/licenses', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          license_name: newLicenseName,
-          license_number: newLicenseNumber,
-          license_type: newLicenseType,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add license');
-      toast.success(`License "${newLicenseName}" added!`);
-      setIsAddLicenseModalOpen(false);
-      setNewLicenseName('');
-      setNewLicenseNumber('');
-      setNewLicenseType('Business License');
-      await fetchLicenses();
-    } catch (err: any) {
-      toast.error(err.message || 'Error adding license');
-    }
-  };
-
-  // Get employees for a specific license (falls back to main employees list)
-  const getEmployeesForLicense = (licId: string): EmployeeRow[] => {
-    return perLicenseEmployees[licId] ?? employees;
-  };
-
   const setEmployeesForLicense = (licId: string, rows: EmployeeRow[]) => {
-    if (licId === activeLicenseId && companyLicenses.length === 1) {
+    setPerLicenseEmployees((prev) => ({ ...prev, [licId]: rows }));
+    if (licId === activeLicenseId) {
       setEmployees(rows);
-    } else {
-      setPerLicenseEmployees((prev) => ({ ...prev, [licId]: rows }));
     }
   };
 
-  // Initial Load
+  // Initial Load: Fetch assigned licenses first, then fetch all module data scoped to the primary license
   useEffect(() => {
-    fetchTreasury();
-    fetchReceipts();
-    fetchPayroll();
-    fetchStock();
-    fetchAgreements();
-    fetchFileBoxes();
-    fetchLicenses();
+    fetchLicenses().then((primaryId) => {
+      loadAllDataForLicense(primaryId);
+    });
   }, []);
 
   if (!user) return null;
@@ -1207,7 +1226,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-[11px]">
                     TIN: {user.tinNumber}
                   </span>
-                  <span>Ã¢â‚¬Â¢</span>
+                  <span>â€¢</span>
                   <span>{user.companyAddress}</span>
                 </div>
               </div>
@@ -1264,8 +1283,8 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`flex items-center gap-2 px-3 py-2 text-xs font-medium border-b-2 whitespace-nowrap transition-colors ${active
-                    ? 'border-primary text-foreground font-semibold'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                  ? 'border-primary text-foreground font-semibold'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
                   }`}
               >
                 <Icon className="w-3.5 h-3.5" />
@@ -1279,65 +1298,44 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       {/* Main Workspace Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
-        {/* Ã¢â€â‚¬Ã¢â€â‚¬ COMPANY / LICENSE SELECTOR BAR Ã¢â€â‚¬Ã¢â€â‚¬ */}
+        {/* LICENSE SELECTOR BAR */}
         {companyLicenses.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/30 rounded-xl border border-border">
-            <span className="text-xs font-semibold text-muted-foreground shrink-0">License / Sub-Company:</span>
-            {companyLicenses.map((lic) => (
-              <button
-                key={lic.id}
-                onClick={() => setActiveLicenseId(lic.id)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
-                  activeLicenseId === lic.id
-                    ? 'border-primary bg-primary text-primary-foreground shadow-xs'
-                    : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/50'
-                }`}
-              >
-                {lic.is_primary && <Building2 className="w-3 h-3" />}
-                {lic.license_name}
-                {lic.license_number && (
-                  <span className="font-mono text-[9px] opacity-70">#{lic.license_number}</span>
-                )}
-              </button>
-            ))}
-            <button
-              onClick={() => setIsAddLicenseModalOpen(true)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-            >
-              <Plus className="w-3 h-3" />
-              Add License
-            </button>
-          </div>
-        )}
-
-        {/* â”€â”€ COMPANY / LICENSE SELECTOR BAR â”€â”€ */}
-        {companyLicenses.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/30 rounded-xl border border-border">
-            <span className="text-xs font-semibold text-muted-foreground shrink-0">License / Sub-Company:</span>
-            {companyLicenses.map((lic) => (
-              <button
-                key={lic.id}
-                onClick={() => setActiveLicenseId(lic.id)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
-                  activeLicenseId === lic.id
-                    ? 'border-primary bg-primary text-primary-foreground shadow-xs'
-                    : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/50'
-                }`}
-              >
-                {lic.is_primary && <Building2 className="w-3 h-3" />}
-                {lic.license_name}
-                {lic.license_number && (
-                  <span className="font-mono text-[9px] opacity-70">#{lic.license_number}</span>
-                )}
-              </button>
-            ))}
-            <button
-              onClick={() => setIsAddLicenseModalOpen(true)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-            >
-              <Plus className="w-3 h-3" />
-              Add License
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-muted/40 rounded-xl border border-border">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-primary" />
+                License / Branch:
+              </span>
+              {companyLicenses.map((lic) => {
+                const isActive = activeLicenseId === lic.id;
+                return (
+                  <button
+                    key={lic.id}
+                    onClick={() => handleSelectLicense(lic.id)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                      isActive
+                        ? 'border-primary bg-primary text-primary-foreground shadow-xs font-semibold'
+                        : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-border/80'
+                    }`}
+                  >
+                    <span>{lic.license_name}</span>
+                    {lic.license_number && (
+                      <span className="font-mono text-[10px] opacity-75">#{lic.license_number}</span>
+                    )}
+                    {lic.is_primary && (
+                      <span className={`text-[9px] px-1 py-0.2 rounded font-mono ${isActive ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                        Primary
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span>Scoped strictly to: </span>
+              <strong className="text-foreground not-italic font-semibold">{activeLicense?.license_name}</strong>
+            </div>
           </div>
         )}
         {/* ========================================================= */}
@@ -1488,7 +1486,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                     {receiptsList.map((r) => (
                       <TableRow key={r.id} className="text-xs hover:bg-muted/30">
                         <TableCell className="font-mono font-medium">{r.fs_number}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{r.machine_number || 'Ã¢â‚¬â€'}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">{r.machine_number || 'â€”'}</TableCell>
                         <TableCell>
                           <Badge variant="secondary" className="text-[10px] capitalize">
                             {r.receipt_type}
@@ -1496,13 +1494,13 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                         </TableCell>
                         <TableCell>
                           <span className="font-medium">{r.partner_name}</span>
-                          <span className="block text-[10px] font-mono text-muted-foreground">{r.partner_tin || 'Ã¢â‚¬â€'}</span>
+                          <span className="block text-[10px] font-mono text-muted-foreground">{r.partner_tin || 'â€”'}</span>
                         </TableCell>
                         <TableCell>{(r.untaxed_amount || 0).toLocaleString()}</TableCell>
                         <TableCell className="text-blue-600 dark:text-blue-400">+{(r.vat_15 || 0).toLocaleString()}</TableCell>
                         <TableCell className="text-emerald-600 dark:text-emerald-400">-{(r.wht_3 || 0).toLocaleString()}</TableCell>
                         <TableCell className="font-bold">{(r.total_amount || 0).toLocaleString()} ETB</TableCell>
-                        <TableCell className="text-muted-foreground">{r.receipt_date || 'Ã¢â‚¬â€'}</TableCell>
+                        <TableCell className="text-muted-foreground">{r.receipt_date || 'â€”'}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
                             {r.state || 'registered'}
@@ -1594,10 +1592,10 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                                   {f.filename}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
-                                  {f.file_size ? `${Math.round(f.file_size / 1024)} KB` : 'Ã¢â‚¬â€'}
+                                  {f.file_size ? `${Math.round(f.file_size / 1024)} KB` : 'â€”'}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground max-w-[200px] truncate">
-                                  {f.notes || 'Ã¢â‚¬â€'}
+                                  {f.notes || 'â€”'}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
                                   {new Date(f.created_at).toLocaleDateString()}
@@ -1691,7 +1689,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                 </p>
                 {lastCalculatedAt && (
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    Ã¢Å“â€œ Last calculated & deducted on: {new Date(lastCalculatedAt).toLocaleString()}
+                    âœ“ Last calculated & deducted on: {new Date(lastCalculatedAt).toLocaleString()}
                   </p>
                 )}
               </div>
@@ -1773,7 +1771,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                     {employees.map((emp) => (
                       <TableRow key={emp.id} className="text-xs hover:bg-muted/30">
                         <TableCell className="font-medium">{emp.name}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{emp.tin || 'Ã¢â‚¬â€'}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">{emp.tin || 'â€”'}</TableCell>
                         <TableCell>{emp.basic.toLocaleString()} ETB</TableCell>
                         <TableCell>{emp.transport.toLocaleString()} ETB</TableCell>
                         <TableCell className="text-amber-600 dark:text-amber-400">-{emp.pensionEmp.toLocaleString()}</TableCell>
@@ -1786,7 +1784,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                     <TableRow className="text-xs font-semibold bg-muted/40 border-t border-border">
                       <TableCell colSpan={2}>Total ({employees.length} Staff)</TableCell>
                       <TableCell>{payrollTotals.basic.toLocaleString()} ETB</TableCell>
-                      <TableCell>Ã¢â‚¬â€</TableCell>
+                      <TableCell>â€”</TableCell>
                       <TableCell className="text-amber-600">-{payrollTotals.pensionEmp.toLocaleString()}</TableCell>
                       <TableCell>+{payrollTotals.pensionOrg.toLocaleString()}</TableCell>
                       <TableCell className="text-red-600">-{payrollTotals.tax.toLocaleString()}</TableCell>
@@ -2077,7 +2075,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                           )}
                         </TableCell>
                         <TableCell className="font-semibold">{p.name}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{p.code || 'Ã¢â‚¬â€'}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">{p.code || 'â€”'}</TableCell>
                         <TableCell>{p.unit_of_measure}</TableCell>
                         <TableCell className="font-bold text-primary">
                           {(p.quantity_on_hand || 0).toLocaleString()} {p.unit_of_measure}
@@ -2181,7 +2179,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
             </DialogDescription>
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 mt-1">
               <AlertTriangle className="w-3 h-3 shrink-0" />
-              <span>Fields with amber borders were not extracted Ã¢â‚¬â€ verify and fill manually before registering.</span>
+              <span>Fields with amber borders were not extracted â€” verify and fill manually before registering.</span>
             </div>
           </DialogHeader>
 
@@ -2599,7 +2597,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
               <div className="col-span-full pt-2 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <span className="text-muted-foreground">
-                  Ã°Å¸ÂÂ¦ Bank Balance Impact: <strong>{totalPayrollDeduction.toLocaleString()} ETB</strong> (Net Salaries + Taxes + Pensions) will be deducted from your Company Bank Balance upon confirmation.
+                  ðŸ¦ Bank Balance Impact: <strong>{totalPayrollDeduction.toLocaleString()} ETB</strong> (Net Salaries + Taxes + Pensions) will be deducted from your Company Bank Balance upon confirmation.
                 </span>
                 <span className="font-semibold text-foreground">
                   Available Bank Balance: {treasury.availableBalance.toLocaleString()} ETB
@@ -2945,7 +2943,7 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-base font-semibold">
-                Adjust Stock Ã¢â‚¬â€ {selectedStockProduct.name}
+                Adjust Stock â€” {selectedStockProduct.name}
               </DialogTitle>
               <DialogDescription className="text-xs">
                 Current on-hand: {selectedStockProduct.quantity_on_hand} {selectedStockProduct.unit_of_measure}
@@ -3039,73 +3037,14 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         }}
       />
 
-      {/* Ã¢â€â‚¬Ã¢â€â‚¬ ADD LICENSE MODAL Ã¢â€â‚¬Ã¢â€â‚¬ */}
-      {isAddLicenseModalOpen && (
-        <Dialog open={isAddLicenseModalOpen} onOpenChange={setIsAddLicenseModalOpen}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="text-base font-semibold">Add New License / Sub-Company</DialogTitle>
-              <DialogDescription className="text-xs">
-                Register an additional business license under the same main company account.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3 py-2">
-              <div className="space-y-1">
-                <Label className="text-xs">License / Trade Name</Label>
-                <Input
-                  value={newLicenseName}
-                  onChange={(e) => setNewLicenseName(e.target.value)}
-                  placeholder="e.g. Import Division License"
-                  className="h-9 text-xs"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">License Number (optional)</Label>
-                <Input
-                  value={newLicenseNumber}
-                  onChange={(e) => setNewLicenseNumber(e.target.value)}
-                  placeholder="e.g. LIC-2024-00456"
-                  className="h-9 text-xs font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">License Type</Label>
-                <select
-                  value={newLicenseType}
-                  onChange={(e) => setNewLicenseType(e.target.value)}
-                  className="w-full h-9 rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option>Business License</option>
-                  <option>Import License</option>
-                  <option>Export License</option>
-                  <option>Service License</option>
-                  <option>Construction License</option>
-                  <option>Manufacturing License</option>
-                  <option>Other</option>
-                </select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" size="sm" onClick={() => setIsAddLicenseModalOpen(false)} className="text-xs h-8">
-                Cancel
-              </Button>
-              <Button size="sm" onClick={handleAddLicenseSubmit} className="text-xs h-8 shadow-xs">
-                <Plus className="w-3 h-3 mr-1" />
-                Add License
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Ã¢â€â‚¬Ã¢â€â‚¬ PAYROLL LICENSE SELECTOR MODAL Ã¢â€â‚¬Ã¢â€â‚¬ */}
+      {/* PAYROLL LICENSE SELECTOR MODAL */}
       {payrollLicenseSelector && (
         <Dialog open={payrollLicenseSelector} onOpenChange={setPayrollLicenseSelector}>
           <DialogContent className="sm:max-w-sm">
             <DialogHeader>
-              <DialogTitle className="text-base font-semibold">Select Company / License for Payroll</DialogTitle>
+              <DialogTitle className="text-base font-semibold">Select Company License for Payroll</DialogTitle>
               <DialogDescription className="text-xs">
-                Choose which license's employee list to calculate payroll for.
+                Choose which license's employee roster to calculate and process payroll for.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2 py-2">
@@ -3115,65 +3054,13 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   <button
                     key={lic.id}
                     onClick={() => {
+                      handleSelectLicense(lic.id);
                       setPayrollTargetLicenseId(lic.id);
                       setPayrollLicenseSelector(false);
                       setIsPayrollModalOpen(true);
                     }}
                     className={`w-full flex items-center justify-between p-3 rounded-lg border text-xs text-left transition-colors hover:border-primary/60 hover:bg-muted/30 ${
-                      payrollTargetLicenseId === lic.id ? 'border-primary bg-primary/5' : 'border-border'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Building2 className="w-3.5 h-3.5 text-primary shrink-0" />
-                      <div>
-                        <div className="font-medium">{lic.license_name}</div>
-                        {lic.license_number && (
-                          <div className="font-mono text-muted-foreground text-[10px]">#{lic.license_number}</div>
-                        )}
-                      </div>
-                    </div>
-                    <span className="text-muted-foreground shrink-0 ml-2">
-                      {empCount} staff
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" size="sm" onClick={() => setPayrollLicenseSelector(false)} className="text-xs h-8">
-                Cancel
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
-
-
-
-      {/* â”€â”€ PAYROLL LICENSE SELECTOR MODAL â”€â”€ */}
-      {payrollLicenseSelector && (
-        <Dialog open={payrollLicenseSelector} onOpenChange={setPayrollLicenseSelector}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="text-base font-semibold">Select Company / License for Payroll</DialogTitle>
-              <DialogDescription className="text-xs">
-                Choose which license's employee list to calculate payroll for.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2 py-2">
-              {companyLicenses.map((lic) => {
-                const empCount = getEmployeesForLicense(lic.id).length;
-                return (
-                  <button
-                    key={lic.id}
-                    onClick={() => {
-                      setPayrollTargetLicenseId(lic.id);
-                      setPayrollLicenseSelector(false);
-                      setIsPayrollModalOpen(true);
-                    }}
-                    className={`w-full flex items-center justify-between p-3 rounded-lg border text-xs text-left transition-colors hover:border-primary/60 hover:bg-muted/30 ${
-                      payrollTargetLicenseId === lic.id ? 'border-primary bg-primary/5' : 'border-border'
+                      activeLicenseId === lic.id ? 'border-primary bg-primary/5' : 'border-border'
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -3204,9 +3091,6 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     </div>
   );
 }
-
-
-
 
 
 

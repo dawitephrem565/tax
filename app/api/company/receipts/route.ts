@@ -15,14 +15,41 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'No company associated with this account' }, { status: 403 });
     }
 
+    const licenseId = req.nextUrl.searchParams.get('license_id');
+
     const admin = createAdminSupabase();
     let query = admin.from('receipt_intakes').select('*').order('created_at', { ascending: false });
+
     if (!ctx.isPlatformAdmin && companyId) {
       query = query.eq('company_id', companyId);
     }
 
-    const { data, error } = await query;
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (licenseId && licenseId !== 'all') {
+      try {
+        query = query.eq('license_id', licenseId);
+      } catch {
+        // column may not exist yet
+      }
+    }
+
+    let { data, error } = await query;
+    if (error && error.message?.includes('license_id')) {
+      let fallbackQuery = admin.from('receipt_intakes').select('*').order('created_at', { ascending: false });
+      if (!ctx.isPlatformAdmin && companyId) {
+        fallbackQuery = fallbackQuery.eq('company_id', companyId);
+      }
+      const retry = await fallbackQuery;
+      if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 });
+      data = (retry.data || []).filter((r: any) => {
+        if (r.license_id) return r.license_id === licenseId;
+        if (r.name?.includes(`[Lic: ${licenseId}]`)) return true;
+        if (licenseId === 'main' && !r.name?.includes('[Lic: ')) return true;
+        return false;
+      });
+      error = null;
+    } else if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
     const mapped = (data || []).map((r: any) => ({
       ...r,
@@ -50,6 +77,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const {
+      license_id,
       fs_number,
       machine_number,
       receipt_type = 'purchase',
@@ -86,49 +114,72 @@ export async function POST(req: NextRequest) {
     }
 
     const receiptDate = date || new Date().toISOString().split('T')[0];
-    const receiptName = `REC/${new Date().getFullYear()}/${Date.now().toString().slice(-4)}`;
+    const receiptName = `REC/${new Date().getFullYear()}/${Date.now().toString().slice(-4)}${license_id && license_id !== 'main' ? ` [Lic: ${license_id}]` : ''}`;
 
-    // Insert Receipt matching 0000_full_schema.sql
-    const { data: newReceipt, error: recError } = await admin
+    const insertPayload: Record<string, any> = {
+      company_id: companyId,
+      name: receiptName,
+      fs_number,
+      machine_number: machine_number || null,
+      receipt_type: receipt_type === 'sale' ? 'sale' : 'purchase',
+      partner_name,
+      partner_tin: partner_tin || null,
+      untaxed_amount: Number(untaxed_amount),
+      vat_amount: Number(vat_15),
+      wht_amount: Number(wht_3),
+      total_amount: Number(total_amount),
+      company_document_path: company_document_path || null,
+      cash_register_receipt_path: cash_receipt_path || null,
+      invoice_date: receiptDate,
+      state: 'posted',
+    };
+
+    if (license_id && license_id !== 'main') {
+      insertPayload.license_id = license_id;
+    }
+
+    let newReceipt: any = null;
+    const { data: inserted, error: recError } = await admin
       .from('receipt_intakes')
-      .insert({
-        company_id: companyId,
-        name: receiptName,
-        fs_number,
-        machine_number: machine_number || null,
-        receipt_type: receipt_type === 'sale' ? 'sale' : 'purchase',
-        partner_name,
-        partner_tin: partner_tin || null,
-        untaxed_amount: Number(untaxed_amount),
-        vat_amount: Number(vat_15),
-        wht_amount: Number(wht_3),
-        total_amount: Number(total_amount),
-        company_document_path: company_document_path || null,
-        cash_register_receipt_path: cash_receipt_path || null,
-        invoice_date: receiptDate,
-        state: 'posted',
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
-    if (recError) return NextResponse.json({ error: recError.message }, { status: 500 });
+    if (recError) {
+      // If error was about license_id column not existing, retry without it
+      if (insertPayload.license_id) {
+        delete insertPayload.license_id;
+        const retry = await admin.from('receipt_intakes').insert(insertPayload).select().single();
+        if (retry.error) return NextResponse.json({ error: retry.error.message }, { status: 500 });
+        newReceipt = retry.data;
+      } else {
+        return NextResponse.json({ error: recError.message }, { status: 500 });
+      }
+    } else {
+      newReceipt = inserted;
+    }
 
     // Automatically synchronize treasury balance transaction
     try {
       const isSale = receipt_type === 'sale';
       const signedAmount = isSale ? Number(total_amount) : -Number(total_amount);
 
-      await admin.from('balance_transactions').insert({
+      const txPayload: Record<string, any> = {
         company_id: companyId,
         date: receiptDate,
         transaction_type: isSale ? 'sale' : 'purchase',
         amount: Math.abs(Number(total_amount)),
         signed_amount: signedAmount,
-        description: `${isSale ? 'Sales Receipt' : 'Vendor Purchase'} - FS: ${fs_number} (${partner_name})`,
+        description: `${isSale ? 'Sales Receipt' : 'Vendor Purchase'} - FS: ${fs_number} (${partner_name})${license_id ? ` [Lic: ${license_id}]` : ''}`,
         receipt_intake_id: newReceipt.id,
         automatic: true,
         created_by: ctx.userId,
-      });
+      };
+      if (license_id && license_id !== 'main') {
+        txPayload.license_id = license_id;
+      }
+
+      await admin.from('balance_transactions').insert(txPayload);
     } catch (e) {
       console.error('Auto balance sync error:', e);
     }

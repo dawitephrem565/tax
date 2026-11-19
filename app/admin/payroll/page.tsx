@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -150,7 +152,7 @@ export default function AdminPayrollPage() {
 
   // Per-company employees store: companyId -> EmployeeRow[]
   const [companyEmployees, setCompanyEmployees] = useState<Record<string, EmployeeRow[]>>({});
-  
+
   // Modal states
   const [companyPickerModalOpen, setCompanyPickerModalOpen] = useState(false);
   const [calculatorModalOpen, setCalculatorModalOpen] = useState(false);
