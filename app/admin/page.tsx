@@ -81,6 +81,13 @@ interface Company {
     managerNationalId?: string;
     metedadriyaDenb?: string;
   };
+  licenses?: Array<{
+    id: string;
+    license_name: string;
+    license_number?: string | null;
+    license_type?: string;
+    is_primary?: boolean;
+  }>;
   createdAt: string;
 }
 
@@ -549,6 +556,21 @@ export default function AdminDashboardPage() {
                               <p className="text-[11px] text-muted-foreground truncate max-w-[180px]">
                                 {c.companyAddress}
                               </p>
+                              {c.licenses && c.licenses.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1 mt-1">
+                                  <span className="text-[10px] text-muted-foreground font-medium">{c.licenses.length} lic:</span>
+                                  {c.licenses.map((lic) => (
+                                    <span
+                                      key={lic.id}
+                                      className={`text-[9px] px-1.5 py-0.5 rounded border font-medium ${
+                                        lic.is_primary ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-muted border-border text-foreground'
+                                      }`}
+                                    >
+                                      {lic.license_name}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </TableCell>
@@ -1116,6 +1138,24 @@ export default function AdminDashboardPage() {
                   ))}
                 </div>
               </div>
+              {selectedCompany.licenses && selectedCompany.licenses.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold">Registered Licenses / Branches ({selectedCompany.licenses.length})</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    {selectedCompany.licenses.map((lic) => (
+                      <div key={lic.id} className="p-2.5 rounded-lg border border-border bg-background text-xs space-y-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-foreground">{lic.license_name}</span>
+                          {lic.is_primary && <Badge variant="secondary" className="text-[9px]">Primary</Badge>}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono">
+                          {lic.license_number ? `#${lic.license_number}` : 'No license #'} • {lic.license_type || 'Business License'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <DialogFooter className="gap-2 sm:gap-0">

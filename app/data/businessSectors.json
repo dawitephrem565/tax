@@ -1,0 +1,15 @@
+[
+  {"name": "Agriculture, Forestry & Fishing", "description": "Farming, livestock, forestry, and fisheries activities"},
+  {"name": "Construction", "description": "Building, civil engineering, and related services"},
+  {"name": "Consulting & Professional Services", "description": "Legal, accounting, management consulting, engineering, etc."},
+  {"name": "Education & Training", "description": "Schools, colleges, training institutes, tutoring"},
+  {"name": "Finance, Insurance & Real Estate", "description": "Banking, insurance, brokerage, property services"},
+  {"name": "Food & Beverage / Hospitality", "description": "Restaurants, hotels, catering, food processing"},
+  {"name": "Healthcare & Social Assistance", "description": "Clinics, hospitals, social services, care homes"},
+  {"name": "Manufacturing & Production", "description": "Factories producing goods from raw materials"},
+  {"name": "Retail & E‑Commerce", "description": "Stores, online shops, wholesale distribution"},
+  {"name": "Technology, Software & IT", "description": "Software development, SaaS, IT services"},
+  {"name": "Transportation & Logistics", "description": "Freight, shipping, courier, warehousing"},
+  {"name": "Arts, Entertainment & Recreation", "description": "Media, performance, sports, tourism"},
+  {"name": "Other / Not Specified", "description": "Any sector not covered above"}
+]

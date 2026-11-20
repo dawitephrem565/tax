@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requirePlatformAdmin } from "@/lib/auth"
 import { fileUrl, LEGACY_DOCUMENT_KEYS, DOCUMENT_LABELS } from "@/lib/documents"
+import { parseNotesMetadata, StoredLicense } from "@/lib/licenses"
 
 export const dynamic = "force-dynamic"
 
@@ -18,6 +19,7 @@ type CompanyRow = {
   phone: string | null
   email: string
   manager_phone: string | null
+  notes: string | null
   status: string
   created_at: string
   business_types: { name: string } | { name: string }[] | null
@@ -35,7 +37,7 @@ export async function GET(req: Request) {
   let query = auth.ctx.supabase
     .from("companies")
     .select(
-      "id, name, tin, address, phone, email, manager_phone, status, created_at, business_types (name), company_documents (document_type, storage_path, file_name), company_members (count)"
+      "id, name, tin, address, phone, email, manager_phone, notes, status, created_at, business_types (name), company_documents (document_type, storage_path, file_name), company_members (count)"
     )
     .order("created_at", { ascending: false })
 
@@ -73,6 +75,23 @@ export async function GET(req: Request) {
       }
     })
 
+    const { licenses } = parseNotesMetadata(company.notes)
+    const primaryLicense: StoredLicense = {
+      id: company.id,
+      company_id: company.id,
+      license_name: `${company.name || "Main"} License`,
+      license_number: null,
+      license_type: "Business License",
+      is_primary: true,
+      created_at: company.created_at,
+    }
+    const finalLicenses =
+      licenses.length > 0
+        ? licenses.some((l) => l.is_primary || l.id === company.id)
+          ? licenses
+          : [primaryLicense, ...licenses]
+        : [primaryLicense]
+
     return {
       _id: company.id,
       id: company.id,
@@ -87,6 +106,7 @@ export async function GET(req: Request) {
       status: company.status,
       files,
       documents,
+      licenses: finalLicenses,
       createdAt: company.created_at,
     }
   })

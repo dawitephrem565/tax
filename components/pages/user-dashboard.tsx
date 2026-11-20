@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -62,10 +62,24 @@ import {
   Image as ImageIcon,
   Eye,
   ExternalLink,
-  FolderOpen
+  FolderOpen,
+  BookOpen,
+  Paperclip,
+  Search,
+  CalendarDays,
+  X
 } from 'lucide-react';
 import NewReportModal from '@/components/modals/new-report-modal';
 import { toast } from 'sonner';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+} from 'recharts';
 
 interface UserDashboardProps {
   user: {
@@ -102,7 +116,7 @@ interface EmployeeRow {
 
 export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'receipts' | 'fileboxes' | 'payroll' | 'agreements' | 'stock' | 'approvals'
+    'overview' | 'receipts' | 'ledger' | 'fileboxes' | 'payroll' | 'agreements' | 'stock' | 'approvals'
   >('overview');
 
   // Reports Modal
@@ -170,11 +184,12 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
 
   const loadAllDataForLicense = (licId: string) => {
     fetchTreasury(licId);
-    fetchReceipts(licId);
+    fetchReceipts(licId, receiptMonth, receiptView);
     fetchPayroll(licId);
     fetchStock(licId);
     fetchAgreements(licId);
     fetchFileBoxes(undefined, licId);
+    if (activeTab === 'ledger') fetchLedger(licId);
   };
 
   const handleSelectLicense = (licId: string) => {
@@ -182,6 +197,10 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     setActiveLicenseId(licId);
     // Strict isolation: clear current loaded data so no bleeding across licenses occurs
     setReceiptsList([]);
+    setReceiptSummary(null);
+    setSelectedReceiptId(null);
+    setReceiptDetail(null);
+    setLedgerReport(null);
     setFileBoxes([]);
     setProducts([]);
     if (perLicenseEmployees[licId]) {
@@ -274,6 +293,12 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [ocrLoading, setOcrLoading] = useState(false);
+  const [receiptMonth, setReceiptMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [receiptView, setReceiptView] = useState<'sale' | 'purchase'>('sale');
+  const [receiptSummary, setReceiptSummary] = useState<any>(null);
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+  const [receiptDetail, setReceiptDetail] = useState<any>(null);
+  const [receiptDetailLoading, setReceiptDetailLoading] = useState(false);
 
   const [receiptUntaxed, setReceiptUntaxed] = useState<number | null>(null);
   const [receiptWhtRate, setReceiptWhtRate] = useState<number>(0);
@@ -287,31 +312,106 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
   const [cashSlipFileName, setCashSlipFileName] = useState('');
   const [invoiceFileObj, setInvoiceFileObj] = useState<File | null>(null);
   const [cashSlipFileObj, setCashSlipFileObj] = useState<File | null>(null);
+  const [invoicePath, setInvoicePath] = useState<string | null>(null);
+  const [cashPath, setCashPath] = useState<string | null>(null);
   const [rawOcrText, setRawOcrText] = useState<string>('');
   const [ocrEngine, setOcrEngine] = useState<string>('');
   const [confidenceNotes, setConfidenceNotes] = useState<string[]>([]);
+  const [extractedVat, setExtractedVat] = useState<number | null>(null);
+  const [extractedTotal, setExtractedTotal] = useState<number | null>(null);
+  const [extractedLines, setExtractedLines] = useState<any[]>([]);
+  const [supplyType, setSupplyType] = useState<'goods' | 'services' | 'mixed' | 'unknown'>('unknown');
+  const [vatTreatment, setVatTreatment] = useState<'standard' | 'zero_rated' | 'exempt' | 'tot' | 'unknown'>('standard');
+  const [ocrCalendar, setOcrCalendar] = useState<string>('gregorian');
+
+  // Accounting ledger state
+  const [ledgerReport, setLedgerReport] = useState<any>(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerView, setLedgerView] = useState<'trial' | 'pnl' | 'bs' | 'tax' | 'journal'>('trial');
+  const [ledgerFrom, setLedgerFrom] = useState(() => `${new Date().getFullYear()}-01-01`);
+  const [ledgerTo, setLedgerTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   const safeUntaxed = receiptUntaxed ?? 0;
-  const calculatedVat = Math.round(safeUntaxed * 0.15 * 100) / 100;
+  const totIncluded = vatTreatment === 'tot' ? Math.round(safeUntaxed * 0.02 * 100) / 100 : 0;
+  const calculatedVat = vatTreatment === 'standard' ? Math.round(safeUntaxed * 0.15 * 100) / 100 : 0;
+  const effectiveVat = vatTreatment === 'standard' ? extractedVat ?? calculatedVat : 0;
   const calculatedWht = Math.round(safeUntaxed * (receiptWhtRate / 100) * 100) / 100;
-  const calculatedTotal = Math.round((safeUntaxed + calculatedVat) * 100) / 100;
+  const calculatedTotal =
+    extractedTotal ?? Math.round((safeUntaxed + effectiveVat + totIncluded) * 100) / 100;
 
-  const fetchReceipts = async (licId?: string) => {
+  const formatMoney = (value: number | null | undefined) =>
+    Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+  const receiptMonthLabel = (() => {
+    const label = new Date(`${receiptMonth}-01T00:00:00`).toLocaleDateString(undefined, {
+      month: 'long',
+      year: 'numeric',
+    });
+    return label || receiptMonth;
+  })();
+
+  const renderGrowth = (value: number | null | undefined) => {
+    if (value === null || value === undefined) {
+      return <span className="text-[10px] text-muted-foreground">no prior month</span>;
+    }
+    const positive = value >= 0;
+    return (
+      <span
+        className={`inline-flex items-center gap-0.5 text-[10px] font-semibold ${
+          positive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+        }`}
+      >
+        {positive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownLeft className="w-3 h-3" />}
+        {Math.abs(value)}%
+      </span>
+    );
+  };
+
+  const prepareImageFile = async (file: File): Promise<File> => {
+    if (!file.type.startsWith('image/') || file.type === 'image/gif') return file;
+    if (file.size <= 1_200_000) return file;
+    try {
+      const objectUrl = URL.createObjectURL(file);
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = reject;
+        element.src = objectUrl;
+      });
+      const maxEdge = 1600;
+      const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) return file;
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+      URL.revokeObjectURL(objectUrl);
+      if (!blob) return file;
+      return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+    } catch {
+      return file;
+    }
+  };
+
+  const fetchReceipts = async (licId?: string, month?: string, view?: 'sale' | 'purchase') => {
     setReceiptsLoading(true);
     try {
       const token = getAuthToken();
       const currentLic = licId ?? activeLicenseId;
-      const url = currentLic ? `/api/company/receipts?license_id=${encodeURIComponent(currentLic)}` : '/api/company/receipts';
-      const res = await fetch(url, {
+      const params = new URLSearchParams();
+      if (currentLic) params.set('license_id', currentLic);
+      params.set('month', month ?? receiptMonth);
+      params.set('type', view ?? receiptView);
+
+      const res = await fetch(`/api/company/receipts?${params.toString()}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.receipts && data.receipts.length > 0) {
-          setReceiptsList(data.receipts);
-        } else {
-          setReceiptsList([]);
-        }
+        setReceiptsList(Array.isArray(data.receipts) ? data.receipts : []);
+        setReceiptSummary(data.summary ?? null);
       }
     } catch (err) {
       console.error('Failed to load receipts:', err);
@@ -320,26 +420,108 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     }
   };
 
+  const fetchReceiptDetail = async (id: string) => {
+    setSelectedReceiptId(id);
+    setReceiptDetail(null);
+    setReceiptDetailLoading(true);
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`/api/company/receipts/${encodeURIComponent(id)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load the receipt');
+      setReceiptDetail(data);
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not open the receipt');
+      setSelectedReceiptId(null);
+    } finally {
+      setReceiptDetailLoading(false);
+    }
+  };
+
+  const fetchLedger = async (licId?: string) => {
+    setLedgerLoading(true);
+    try {
+      const token = getAuthToken();
+      const params = new URLSearchParams({ from: ledgerFrom, to: ledgerTo });
+      const currentLic = licId ?? activeLicenseId;
+      if (currentLic && currentLic !== 'all') params.set('license_id', currentLic);
+      const res = await fetch(`/api/company/ledger?${params.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load the ledger');
+      setLedgerReport(data);
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not load the accounting ledger');
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
+  const syncLedger = async () => {
+    setLedgerLoading(true);
+    try {
+      const token = getAuthToken();
+      const res = await fetch('/api/company/ledger', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ action: 'sync', license_id: activeLicenseId, from: ledgerFrom, to: ledgerTo }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
+      toast.success(`Posted ${data.posted} receipt(s) to the ledger${data.failed ? `, ${data.failed} failed` : ''}.`);
+      await fetchLedger();
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not post receipts to the ledger');
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
+  const openReceiptModal = () => {
+    if (!receiptDate) setReceiptDate(new Date().toISOString().slice(0, 10));
+    setIsReceiptModalOpen(true);
+  };
+
   const handleOcrUpload = async (file: File, type: 'invoice' | 'cash') => {
-    const curInvoice = type === 'invoice' ? file : invoiceFileObj;
-    const curCash = type === 'cash' ? file : cashSlipFileObj;
+    const prepared = await prepareImageFile(file);
+    if (prepared.size > 4 * 1024 * 1024) {
+      toast.error('Insert is larger than 4 MB. Compress the document or split a multi-page PDF.');
+      return;
+    }
 
     if (type === 'invoice') {
       setInvoiceFileName(file.name);
-      setInvoiceFileObj(file);
+      setInvoiceFileObj(prepared);
     } else {
       setCashSlipFileName(file.name);
-      setCashSlipFileObj(file);
+      setCashSlipFileObj(prepared);
     }
 
     setOcrLoading(true);
-    toast.info(`Extracting data from ${file.name}...`);
+    toast.info(`Extracting fiscal fields from ${file.name}...`);
     try {
       const formData = new FormData();
-      if (curInvoice) formData.append('companyDocument', curInvoice);
-      if (curCash) formData.append('posReceipt', curCash);
-      if (user?.tinNumber) formData.append('companyTin', user.tinNumber);
-      if (user?.fullName) formData.append('companyName', user.fullName);
+      if (type === 'invoice') {
+        formData.append('companyDocument', prepared);
+      } else if (invoicePath) {
+        formData.append('companyDocumentPath', invoicePath);
+      } else if (invoiceFileObj) {
+        formData.append('companyDocument', invoiceFileObj);
+      }
+
+      if (type === 'cash') {
+        formData.append('posReceipt', prepared);
+      } else if (cashPath) {
+        formData.append('posReceiptPath', cashPath);
+      } else if (cashSlipFileObj) {
+        formData.append('posReceipt', cashSlipFileObj);
+      }
 
       const res = await fetch('/api/ocr/extract-receipt', {
         method: 'POST',
@@ -355,20 +537,36 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         setPartnerTin(d.partner_tin ?? '');
         setReceiptUntaxed(d.untaxed_amount ?? null);
         setReceiptWhtRate(d.wht_rate ?? 0);
+        setExtractedVat(d.vat_amount ?? null);
+        setExtractedTotal(d.total_amount ?? null);
+        setExtractedLines(Array.isArray(d.lines) ? d.lines : []);
+        setSupplyType(d.supply_type ?? 'unknown');
+        const treatment =
+          (!d.vat_treatment || d.vat_treatment === 'unknown') && Number(d.vat_amount || 0) > 0
+            ? 'standard'
+            : d.vat_treatment ?? 'standard';
+        setVatTreatment(treatment as any);
+        setOcrCalendar(d.calendar ?? 'gregorian');
+        setReceiptType(d.classification === 'sale' ? 'sale' : 'purchase');
         if (d.receipt_date) setReceiptDate(d.receipt_date);
-        if (d.classification?.toLowerCase().includes('sale')) setReceiptType('sale');
-        else setReceiptType('purchase');
         if (json.rawText) setRawOcrText(json.rawText);
         setOcrEngine(json.engine ?? 'unknown');
         setConfidenceNotes(d.confidence_notes ?? []);
-        const engineLabel = json.engine === 'vision-llm' ? 'Gemini Vision' : 'Tesseract Fallback';
-        toast.success(`${engineLabel}: FS ${d.fs_number || 'â€”'}, Total ${d.total_amount?.toLocaleString() ?? 'â€”'} ETB`);
+        if (json.files?.companyDocument?.path) setInvoicePath(json.files.companyDocument.path);
+        if (json.files?.posReceipt?.path) setCashPath(json.files.posReceipt.path);
+
+        const engineLabel = json.engine === 'vision-llm' ? 'Gemini Vision' : 'Tesseract fallback';
+        toast.success(
+          `${engineLabel}: FS ${d.fs_number || '—'}, Total ${
+            d.total_amount != null ? Number(d.total_amount).toLocaleString() : '—'
+          } ETB`
+        );
       } else {
-        toast.warning('Extraction returned no data. Fill fields manually.');
+        toast.warning(json.error || 'Extraction returned no data. Fill the fields manually.');
       }
     } catch (err) {
-      console.error('OCR Error:', err);
-      toast.error('Extraction error. Fields can be filled manually.');
+      console.error('OCR error:', err);
+      toast.error('Extraction failed. The fields can be filled manually.');
     } finally {
       setOcrLoading(false);
     }
@@ -387,14 +585,26 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     setCashSlipFileName('');
     setInvoiceFileObj(null);
     setCashSlipFileObj(null);
+    setInvoicePath('');
+    setCashPath('');
     setRawOcrText('');
     setOcrEngine('');
     setConfidenceNotes([]);
+    setExtractedVat(null);
+    setExtractedTotal(null);
+    setExtractedLines([]);
+    setSupplyType('unknown');
+    setVatTreatment('standard');
+    setOcrCalendar('gregorian');
   };
 
   const handleRegisterReceipt = async () => {
     if (!fsNumber || !partnerName) {
       toast.error('FS Number and Partner Name are required.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(receiptDate)) {
+      toast.error('Enter the receipt date extracted from the document (YYYY-MM-DD).');
       return;
     }
     try {
@@ -406,16 +616,32 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          license_id: activeLicenseId,
+          license_id: activeLicenseId === 'all' ? 'main' : activeLicenseId,
           fs_number: fsNumber,
           machine_number: machineNumber,
           receipt_type: receiptType,
           partner_name: partnerName,
           partner_tin: partnerTin,
+          buyer_tin: receiptType === 'purchase' ? partnerTin : user?.tinNumber,
+          seller_tin: receiptType === 'sale' ? user?.tinNumber : partnerTin,
           untaxed_amount: safeUntaxed,
-          vat_15: calculatedVat,
-          wht_3: calculatedWht,
+          vat_amount: effectiveVat,
+          wht_amount: calculatedWht,
+          wht_rate: Number(receiptWhtRate) || 0,
           total_amount: calculatedTotal,
+          extracted_total: extractedTotal,
+          extracted_vat: extractedVat,
+          supply_type: supplyType,
+          vat_treatment: vatTreatment,
+          calendar: ocrCalendar,
+          company_document_path: invoicePath || undefined,
+          company_document_name: invoiceFileName || undefined,
+          cash_receipt_path: cashPath || undefined,
+          cash_register_receipt_name: cashSlipFileName || undefined,
+          ocr_engine: ocrEngine || undefined,
+          raw_text: rawOcrText || undefined,
+          confidence_notes: confidenceNotes,
+          lines: extractedLines,
           date: receiptDate,
         }),
       });
@@ -423,11 +649,16 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to register receipt');
 
-      toast.success(`Receipt registered for ${activeLicense?.license_name || 'License'} with duplicate detection check!`);
+      toast.success(
+        `${receiptType === 'sale' ? 'Sales' : 'Purchase'} receipt registered${
+          data.ledgerPosted ? ' and posted to the ledger' : ''
+        }.`
+      );
       setIsReceiptModalOpen(false);
       handleClearReceipt();
       fetchReceipts(activeLicenseId);
       fetchTreasury(activeLicenseId); // update treasury
+      if (activeTab === 'ledger' || ledgerReport) fetchLedger();
     } catch (err: any) {
       handleAuthError(err, 'Error registering receipt');
     }
@@ -1206,6 +1437,19 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
     });
   }, []);
 
+  // Refetch the receipt list when the month or the sales/purchases view changes.
+  useEffect(() => {
+    if (!user) return;
+    fetchReceipts();
+  }, [receiptMonth, receiptView]);
+
+  // Load the ledger the first time the accounting tab is opened.
+  useEffect(() => {
+    if (activeTab === 'ledger' && !ledgerReport && !ledgerLoading) {
+      fetchLedger();
+    }
+  }, [activeTab]);
+
   if (!user) return null;
 
   return (
@@ -1269,7 +1513,8 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex overflow-x-auto gap-1 border-t border-border pt-1">
           {[
             { id: 'overview', label: 'Executive KPI & Treasury', icon: TrendingUp },
-            { id: 'receipts', label: 'Dual-Image Receipt Intake', icon: Receipt },
+            { id: 'receipts', label: 'Sales & Purchase Register', icon: Receipt },
+            { id: 'ledger', label: 'Accounting (Peachtree)', icon: BookOpen },
             { id: 'fileboxes', label: 'File Boxes', icon: FileBox },
             { id: 'payroll', label: 'Ethiopian Payroll & Tax', icon: Users },
             { id: 'agreements', label: 'Agreements (Word Editor)', icon: FileText },
@@ -1447,60 +1692,367 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
         {/* ========================================================= */}
         {activeTab === 'receipts' && (
           <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-background p-4 rounded-xl border border-border">
+            {/* Toolbar */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-background p-4 rounded-xl border border-border">
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-sm">Dual-Image Receipt Intake & Duplicate Detection</h3>
-                  <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
-                    Gemini Vision + Tesseract
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-semibold text-sm">Sales &amp; Purchases Workspace</h3>
+                  <Badge variant="outline" className="text-[10px]">
+                    {activeLicense?.license_name || 'Main License'}
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Upload Invoice and POS Machine receipt. Our Ethiopian OCR parser extracts FS Number, Machine Number, TIN, and 15% VAT automatically.
+                  Monthly register per license. Click any row to open the attached document, the extracted fields,
+                  line items, and the posted journal entry.
                 </p>
               </div>
-              <Button size="sm" onClick={() => setIsReceiptModalOpen(true)} className="h-8 gap-1.5 text-xs shadow-xs">
-                <Plus className="w-3.5 h-3.5" />
-                <span>New Receipt Entry</span>
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-lg border border-border overflow-hidden">
+                  <button
+                    onClick={() => setReceiptView('sale')}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      receiptView === 'sale'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-background text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Sales
+                  </button>
+                  <button
+                    onClick={() => setReceiptView('purchase')}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      receiptView === 'purchase'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-background text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Purchases
+                  </button>
+                </div>
+                <Input
+                  type="month"
+                  value={receiptMonth}
+                  onChange={(e) => e.target.value && setReceiptMonth(e.target.value)}
+                  className="h-8 w-[150px] text-xs"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fetchReceipts()}
+                  disabled={receiptsLoading}
+                  className="h-8 gap-1.5 text-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${receiptsLoading ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </Button>
+                <Button size="sm" onClick={openReceiptModal} className="h-8 gap-1.5 text-xs shadow-xs">
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Receipt Entry</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* KPI cards */}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-border shadow-xs">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Sales · {receiptMonthLabel}
+                    </span>
+                    {receiptView === 'sale' && <Badge variant="secondary" className="text-[9px]">viewing</Badge>}
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-xl font-bold">{formatMoney(receiptSummary?.sales?.total)}</span>
+                    <span className="text-[10px] text-muted-foreground">ETB</span>
+                    {renderGrowth(receiptSummary?.growth?.sales)}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {receiptSummary?.sales?.count ?? 0} invoices · VAT {formatMoney(receiptSummary?.sales?.vat)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border shadow-xs">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Purchases · {receiptMonthLabel}
+                    </span>
+                    {receiptView === 'purchase' && <Badge variant="secondary" className="text-[9px]">viewing</Badge>}
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-xl font-bold">{formatMoney(receiptSummary?.purchases?.total)}</span>
+                    <span className="text-[10px] text-muted-foreground">ETB</span>
+                    {renderGrowth(receiptSummary?.growth?.purchases)}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {receiptSummary?.purchases?.count ?? 0} receipts · WHT{' '}
+                    {formatMoney(receiptSummary?.purchases?.wht)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border shadow-xs">
+                <CardContent className="p-4">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Net movement
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span
+                      className={`text-xl font-bold ${
+                        (receiptSummary?.sales?.total ?? 0) - (receiptSummary?.purchases?.total ?? 0) < 0
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-foreground'
+                      }`}
+                    >
+                      {formatMoney((receiptSummary?.sales?.total ?? 0) - (receiptSummary?.purchases?.total ?? 0))}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">ETB</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Sales minus purchases for the month</p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border shadow-xs">
+                <CardContent className="p-4">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    VAT payable
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-xl font-bold">
+                      {formatMoney((receiptSummary?.sales?.vat ?? 0) - (receiptSummary?.purchases?.vat ?? 0))}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">ETB</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Output VAT − input VAT (before TOT)</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Status cards + growth chart */}
+            <div className="grid gap-3 lg:grid-cols-3">
+              <Card className="border-border shadow-xs">
+                <CardHeader className="py-3 px-4">
+                  <CardTitle className="text-xs font-semibold">Receipt status</CardTitle>
+                  <CardDescription className="text-[10px]">All receipts in {receiptMonthLabel}</CardDescription>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 pt-0 space-y-2">
+                  {[
+                    { label: 'Registered', value: receiptSummary?.byState?.registered ?? 0, tone: 'text-emerald-600' },
+                    { label: 'Draft / OCR done', value: receiptSummary?.byState?.draft ?? 0, tone: 'text-amber-600' },
+                    { label: 'Cancelled', value: receiptSummary?.byState?.cancelled ?? 0, tone: 'text-muted-foreground' },
+                  ].map((row) => (
+                    <div key={row.label} className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">{row.label}</span>
+                      <span className={`font-semibold ${row.tone}`}>{row.value}</span>
+                    </div>
+                  ))}
+                  <div className="border-t border-border pt-2 flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">With evidence attached</span>
+                    <span className="font-semibold">
+                      {receiptsList.filter((r) => r.has_evidence).length}/{receiptsList.length}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border shadow-xs">
+                <CardHeader className="py-3 px-4">
+                  <CardTitle className="text-xs font-semibold">Month-over-month</CardTitle>
+                  <CardDescription className="text-[10px]">
+                    Compared with {receiptSummary?.previousMonth || 'the previous month'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 pt-0 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Sales growth</span>
+                    {renderGrowth(receiptSummary?.growth?.sales)}
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Purchase growth</span>
+                    {renderGrowth(receiptSummary?.growth?.purchases)}
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Sales invoices</span>
+                    <span className="font-semibold">{receiptSummary?.sales?.count ?? 0}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Purchase receipts</span>
+                    <span className="font-semibold">{receiptSummary?.purchases?.count ?? 0}</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border shadow-xs">
+                <CardHeader className="py-3 px-4">
+                  <CardTitle className="text-xs font-semibold">This month at a glance</CardTitle>
+                  <CardDescription className="text-[10px]">{activeLicense?.license_name}</CardDescription>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 pt-0 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Untaxed sales</span>
+                    <span>{formatMoney(receiptSummary?.sales?.untaxed)} ETB</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Untaxed purchases</span>
+                    <span>{formatMoney(receiptSummary?.purchases?.untaxed)} ETB</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">WHT withheld on purchases</span>
+                    <span>{formatMoney(receiptSummary?.purchases?.wht)} ETB</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground pt-1 border-t border-border">
+                    Data is isolated to the selected license. Switch licence above to see another branch.
+                  </p>
+                </CardContent>
+              </Card>
             </div>
 
             <Card className="border-border shadow-xs">
+              <CardHeader className="py-3 px-4">
+                <CardTitle className="text-xs font-semibold">Daily growth · {receiptMonthLabel}</CardTitle>
+                <CardDescription className="text-[10px]">Sales vs purchases total per day (ETB)</CardDescription>
+                <CardAction className="self-center">
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Sales
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" /> Purchases
+                    </span>
+                  </div>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="px-2 pb-4 pt-0">
+                <div className="h-[220px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={(receiptSummary?.daily ?? []).map((day: any) => ({
+                        day: day.date.slice(8),
+                        sales: day.sales,
+                        purchases: day.purchases,
+                      }))}
+                      margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="purchaseFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis
+                        tick={{ fontSize: 10 }}
+                        tickLine={false}
+                        axisLine={false}
+                        width={54}
+                        tickFormatter={(value) => Number(value).toLocaleString()}
+                      />
+                      <RechartsTooltip
+                        formatter={(value: any) => `${formatMoney(Number(value))} ETB`}
+                        labelFormatter={(label) => `Day ${label}`}
+                        contentStyle={{ fontSize: 11, borderRadius: 8 }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="sales"
+                        name="Sales"
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        fill="url(#salesFill)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="purchases"
+                        name="Purchases"
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        fill="url(#purchaseFill)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border shadow-xs">
+              <CardHeader className="py-3 px-4">
+                <CardTitle className="text-xs font-semibold capitalize">{receiptView} register</CardTitle>
+                <CardDescription className="text-[10px]">
+                  {receiptsList.length} record(s) · click a row for the attached document and extracted data
+                </CardDescription>
+                <CardAction className="self-center">
+                  <Badge variant="outline" className="text-[10px]">
+                    {receiptMonthLabel}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
               <CardContent className="p-0">
                 <Table>
                   <TableHeader>
                     <TableRow className="text-xs">
-                      <TableHead>FS Number</TableHead>
-                      <TableHead>Machine No.</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Partner / TIN</TableHead>
-                      <TableHead>Untaxed (ETB)</TableHead>
-                      <TableHead>15% VAT</TableHead>
-                      <TableHead>3% WHT</TableHead>
-                      <TableHead>Total (ETB)</TableHead>
                       <TableHead>Date</TableHead>
+                      <TableHead>FS / Machine</TableHead>
+                      <TableHead>Partner</TableHead>
+                      <TableHead>Supply</TableHead>
+                      <TableHead className="text-right">Untaxed</TableHead>
+                      <TableHead className="text-right">VAT</TableHead>
+                      <TableHead className="text-right">WHT</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>Evidence</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {receiptsList.map((r) => (
-                      <TableRow key={r.id} className="text-xs hover:bg-muted/30">
-                        <TableCell className="font-mono font-medium">{r.fs_number}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{r.machine_number || 'â€”'}</TableCell>
+                      <TableRow
+                        key={r.id}
+                        onClick={() => fetchReceiptDetail(r.id)}
+                        className="text-xs cursor-pointer hover:bg-muted/40"
+                      >
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {r.receipt_date || '—'}
+                        </TableCell>
                         <TableCell>
-                          <Badge variant="secondary" className="text-[10px] capitalize">
-                            {r.receipt_type}
-                          </Badge>
+                          <span className="font-mono font-medium block">{r.fs_number}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground block">
+                            {r.machine_number || 'no machine'}
+                          </span>
                         </TableCell>
                         <TableCell>
                           <span className="font-medium">{r.partner_name}</span>
-                          <span className="block text-[10px] font-mono text-muted-foreground">{r.partner_tin || 'â€”'}</span>
+                          <span className="block text-[10px] font-mono text-muted-foreground">
+                            {r.partner_tin || 'no TIN'}
+                          </span>
                         </TableCell>
-                        <TableCell>{(r.untaxed_amount || 0).toLocaleString()}</TableCell>
-                        <TableCell className="text-blue-600 dark:text-blue-400">+{(r.vat_15 || 0).toLocaleString()}</TableCell>
-                        <TableCell className="text-emerald-600 dark:text-emerald-400">-{(r.wht_3 || 0).toLocaleString()}</TableCell>
-                        <TableCell className="font-bold">{(r.total_amount || 0).toLocaleString()} ETB</TableCell>
-                        <TableCell className="text-muted-foreground">{r.receipt_date || 'â€”'}</TableCell>
+                        <TableCell className="capitalize text-[11px] text-muted-foreground">
+                          {r.supply_type || 'unknown'}
+                        </TableCell>
+                        <TableCell className="text-right">{formatMoney(r.untaxed_amount)}</TableCell>
+                        <TableCell className="text-right text-blue-600 dark:text-blue-400">
+                          +{formatMoney(r.vat_15)}
+                        </TableCell>
+                        <TableCell className="text-right text-emerald-600 dark:text-emerald-400">
+                          {r.wht_3 ? `-${formatMoney(r.wht_3)}` : '—'}
+                        </TableCell>
+                        <TableCell className="text-right font-bold whitespace-nowrap">
+                          {formatMoney(r.total_amount)} ETB
+                        </TableCell>
+                        <TableCell>
+                          {r.has_evidence ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600">
+                              <Paperclip className="w-3 h-3" /> attached
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">none</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
                             {r.state || 'registered'}
@@ -1508,10 +2060,774 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                         </TableCell>
                       </TableRow>
                     ))}
+                    {receiptsList.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-center py-10 text-xs text-muted-foreground">
+                          {receiptsLoading
+                            ? 'Loading receipts…'
+                            : `No ${receiptView} receipts registered for ${receiptMonthLabel}.`}
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </CardContent>
             </Card>
+          </div>
+        )}
+
+        {/* Receipt detail dialog */}
+        <Dialog
+          open={Boolean(selectedReceiptId)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedReceiptId(null);
+              setReceiptDetail(null);
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-3xl max-h-[92vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-base font-semibold flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-primary" />
+                {receiptDetail?.receipt?.fs_number
+                  ? `Receipt ${receiptDetail.receipt.fs_number}`
+                  : 'Receipt details'}
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                {receiptDetail?.receipt
+                  ? `${receiptDetail.receipt.partner_name || 'Unknown partner'} · ${
+                      receiptDetail.receipt.receipt_date || 'no date'
+                    } · ${receiptDetail.receipt.receipt_type}`
+                  : 'Loading the stored document and extracted fields…'}
+              </DialogDescription>
+            </DialogHeader>
+
+            {receiptDetailLoading && (
+              <div className="py-10 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin" /> Loading receipt…
+              </div>
+            )}
+
+            {!receiptDetailLoading && receiptDetail?.receipt && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="secondary" className="text-[10px] capitalize">
+                    {receiptDetail.receipt.receipt_type}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    {receiptDetail.receipt.state || 'registered'}
+                  </Badge>
+                  {receiptDetail.receipt.vat_treatment && (
+                    <Badge variant="outline" className="text-[10px]">
+                      VAT: {String(receiptDetail.receipt.vat_treatment).replace('_', ' ')}
+                    </Badge>
+                  )}
+                  {receiptDetail.receipt.supply_type && (
+                    <Badge variant="outline" className="text-[10px] capitalize">
+                      {receiptDetail.receipt.supply_type}
+                    </Badge>
+                  )}
+                  {receiptDetail.receipt.license_id && (
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      license: {receiptDetail.receipt.license_id}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  {[
+                    { label: 'Partner TIN', value: receiptDetail.receipt.partner_tin || '—', mono: true },
+                    { label: 'Buyer TIN', value: receiptDetail.receipt.buyer_tin || '—', mono: true },
+                    { label: 'Seller TIN', value: receiptDetail.receipt.seller_tin || '—', mono: true },
+                    { label: 'Machine No.', value: receiptDetail.receipt.machine_number || '—', mono: true },
+                    { label: 'Untaxed', value: `${formatMoney(receiptDetail.receipt.untaxed_amount)} ETB` },
+                    { label: 'VAT', value: `${formatMoney(receiptDetail.receipt.vat_amount)} ETB` },
+                    {
+                      label: `WHT ${receiptDetail.receipt.wht_rate ? `(${receiptDetail.receipt.wht_rate}%)` : ''}`,
+                      value: `${formatMoney(receiptDetail.receipt.wht_amount)} ETB`,
+                    },
+                    { label: 'Total', value: `${formatMoney(receiptDetail.receipt.total_amount)} ETB`, strong: true },
+                  ].map((field) => (
+                    <div key={field.label} className="rounded-lg border border-border p-2 bg-muted/30">
+                      <div className="text-[10px] text-muted-foreground">{field.label}</div>
+                      <div
+                        className={`${field.mono ? 'font-mono' : ''} ${
+                          field.strong ? 'font-bold' : 'font-medium'
+                        } truncate`}
+                      >
+                        {field.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Evidence */}
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold flex items-center gap-1.5">
+                    <Paperclip className="w-3.5 h-3.5" /> Attached documents
+                  </div>
+                  {(receiptDetail.evidence ?? []).length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      No document stored for this receipt (it may have been entered manually or the upload was not kept).
+                    </p>
+                  )}
+                  {(receiptDetail.evidence ?? []).map((item: any, idx: number) => (
+                    <div key={`${item.kind}-${idx}`} className="border border-border rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-muted/40 text-[11px]">
+                        <span className="font-medium capitalize">
+                          {item.kind === 'pos_receipt' ? 'Cash register receipt' : 'Company document'}
+                          {item.name ? ` · ${item.name}` : ''}
+                        </span>
+                        {item.url && (
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            <ExternalLink className="w-3 h-3" /> Open
+                          </a>
+                        )}
+                      </div>
+                      {item.url ? (
+                        item.mimeType === 'application/pdf' ? (
+                          <iframe src={item.url} title={item.name || 'Receipt PDF'} className="w-full h-72" />
+                        ) : (
+                          <img
+                            src={item.url}
+                            alt={item.name || 'Receipt'}
+                            className="max-h-[420px] w-full object-contain bg-background"
+                          />
+                        )
+                      ) : (
+                        <div className="px-3 py-6 text-center text-[11px] text-muted-foreground">
+                          Preview unavailable.
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {(receiptDetail.lines ?? []).length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-semibold">Line items</div>
+                    <div className="border border-border rounded-lg">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="text-[10px]">
+                            <TableHead>#</TableHead>
+                            <TableHead>Description</TableHead>
+                            <TableHead className="text-right">Qty</TableHead>
+                            <TableHead className="text-right">Unit price</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
+                            <TableHead className="text-right">VAT</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {receiptDetail.lines.map((line: any) => (
+                            <TableRow key={line.id} className="text-[11px]">
+                              <TableCell>{line.line_no}</TableCell>
+                              <TableCell>{line.description}</TableCell>
+                              <TableCell className="text-right">{line.quantity ?? '—'}</TableCell>
+                              <TableCell className="text-right">{formatMoney(line.unit_price)}</TableCell>
+                              <TableCell className="text-right">{formatMoney(line.untaxed_amount)}</TableCell>
+                              <TableCell className="text-right">{formatMoney(line.vat_amount)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <div className="text-xs font-semibold flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5" /> Journal entry
+                  </div>
+                  {receiptDetail.journal ? (
+                    <div className="border border-border rounded-lg">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="text-[10px]">
+                            <TableHead>Account</TableHead>
+                            <TableHead>Description</TableHead>
+                            <TableHead className="text-right">Debit</TableHead>
+                            <TableHead className="text-right">Credit</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {receiptDetail.journal.lines.map((line: any, idx: number) => (
+                            <TableRow key={idx} className="text-[11px]">
+                              <TableCell className="font-medium">{line.account}</TableCell>
+                              <TableCell className="text-muted-foreground">{line.description}</TableCell>
+                              <TableCell className="text-right">{line.debit ? formatMoney(line.debit) : '—'}</TableCell>
+                              <TableCell className="text-right">{line.credit ? formatMoney(line.credit) : '—'}</TableCell>
+                            </TableRow>
+                          ))}
+                          <TableRow className="text-[11px] font-bold bg-muted/40">
+                            <TableCell colSpan={2}>Total</TableCell>
+                            <TableCell className="text-right">{formatMoney(receiptDetail.journal.totalDebit)}</TableCell>
+                            <TableCell className="text-right">{formatMoney(receiptDetail.journal.totalCredit)}</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Not posted to the ledger yet. Use the Accounting tab → “Post receipts to ledger”.
+                    </p>
+                  )}
+                </div>
+
+                {receiptDetail.receipt.ocr_warnings && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-[11px] text-amber-700 dark:text-amber-400 space-y-1">
+                    <div className="font-semibold flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Extraction warnings
+                    </div>
+                    {String(receiptDetail.receipt.ocr_warnings)
+                      .split('\n')
+                      .filter(Boolean)
+                      .map((note: string, idx: number) => (
+                        <div key={idx}>• {note}</div>
+                      ))}
+                  </div>
+                )}
+
+                {receiptDetail.receipt.raw_text && (
+                  <details className="border border-border rounded-lg">
+                    <summary className="cursor-pointer px-3 py-2 text-[11px] font-medium bg-muted/40">
+                      Raw OCR text ({receiptDetail.receipt.ocr_engine || 'unknown engine'})
+                    </summary>
+                    <pre className="text-[10px] font-mono whitespace-pre-wrap max-h-56 overflow-y-auto p-3">
+                      {receiptDetail.receipt.raw_text}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setSelectedReceiptId(null)} className="text-xs h-8">
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ========================================================= */}
+        {/* TAB: ACCOUNTING / GENERAL LEDGER (PEACHTREE-STYLE) */}
+        {/* ========================================================= */}
+        {activeTab === 'ledger' && (
+          <div className="space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-background p-4 rounded-xl border border-border">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-semibold text-sm">General Ledger &amp; Financial Statements</h3>
+                  <Badge variant="outline" className="text-[10px]">
+                    {activeLicense?.license_name || 'Main License'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Double-entry ledger fed by the sales and purchase registers. Chart of accounts is seeded per
+                  Ethiopian SME practice (VAT, TOT, WHT, payroll).
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="space-y-0.5">
+                  <Label className="text-[10px] text-muted-foreground">From</Label>
+                  <Input
+                    type="date"
+                    value={ledgerFrom}
+                    onChange={(e) => e.target.value && setLedgerFrom(e.target.value)}
+                    className="h-8 w-[140px] text-xs"
+                  />
+                </div>
+                <div className="space-y-0.5">
+                  <Label className="text-[10px] text-muted-foreground">To</Label>
+                  <Input
+                    type="date"
+                    value={ledgerTo}
+                    onChange={(e) => e.target.value && setLedgerTo(e.target.value)}
+                    className="h-8 w-[140px] text-xs"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fetchLedger()}
+                  disabled={ledgerLoading}
+                  className="h-8 gap-1.5 text-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${ledgerLoading ? 'animate-spin' : ''}`} />
+                  Load
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={syncLedger}
+                  disabled={ledgerLoading}
+                  className="h-8 gap-1.5 text-xs shadow-xs"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  Post receipts to ledger
+                </Button>
+              </div>
+            </div>
+
+            {(ledgerReport?.unpostedReceipts ?? 0) > 0 && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <strong>{ledgerReport.unpostedReceipts}</strong> receipt(s) in this period are not posted to the
+                  ledger yet. Use “Post receipts to ledger” to generate the journal entries.
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-border shadow-xs">
+                <CardContent className="p-4">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Debits = credits
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span
+                      className={`text-lg font-bold ${
+                        ledgerReport &&
+                        Math.round(ledgerReport.trialBalance.totalDebit * 100) ===
+                          Math.round(ledgerReport.trialBalance.totalCredit * 100)
+                          ? 'text-emerald-600'
+                          : 'text-red-600'
+                      }`}
+                    >
+                      {formatMoney(ledgerReport?.trialBalance?.totalDebit)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">ETB</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Credits {formatMoney(ledgerReport?.trialBalance?.totalCredit)} ETB
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-border shadow-xs">
+                <CardContent className="p-4">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Net profit
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span
+                      className={`text-lg font-bold ${
+                        (ledgerReport?.profitAndLoss?.netProfit ?? 0) < 0
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-foreground'
+                      }`}
+                    >
+                      {formatMoney(ledgerReport?.profitAndLoss?.netProfit)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">ETB</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Income {formatMoney(ledgerReport?.profitAndLoss?.totalIncome)} · Expenses{' '}
+                    {formatMoney(ledgerReport?.profitAndLoss?.totalExpenses)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-border shadow-xs">
+                <CardContent className="p-4">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    VAT net payable
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-lg font-bold">{formatMoney(ledgerReport?.vatReturn?.netPayable)}</span>
+                    <span className="text-[10px] text-muted-foreground">ETB</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Output {formatMoney(ledgerReport?.vatReturn?.outputVat)} · Input{' '}
+                    {formatMoney(ledgerReport?.vatReturn?.inputVat)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="border-border shadow-xs">
+                <CardContent className="p-4">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Unposted receipts
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span
+                      className={`text-lg font-bold ${
+                        (ledgerReport?.unpostedReceipts ?? 0) > 0 ? 'text-amber-600' : 'text-emerald-600'
+                      }`}
+                    >
+                      {ledgerReport?.unpostedReceipts ?? 0}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Period {ledgerReport?.range?.from || ledgerFrom} → {ledgerReport?.range?.to || ledgerTo}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { id: 'trial', label: 'Trial Balance' },
+                { id: 'pnl', label: 'Profit & Loss' },
+                { id: 'bs', label: 'Balance Sheet' },
+                { id: 'tax', label: 'VAT & WHT Return' },
+                { id: 'journal', label: 'Journal Entries' },
+              ].map((view) => (
+                <button
+                  key={view.id}
+                  onClick={() => setLedgerView(view.id as any)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ledgerView === view.id
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {view.label}
+                </button>
+              ))}
+            </div>
+
+            {ledgerLoading && !ledgerReport && (
+              <Card className="border-border shadow-xs">
+                <CardContent className="py-12 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Building the ledger from journal entries…
+                </CardContent>
+              </Card>
+            )}
+
+            {ledgerView === 'trial' && ledgerReport && (
+              <Card className="border-border shadow-xs">
+                <CardHeader className="py-3 px-4">
+                  <CardTitle className="text-xs font-semibold">Trial balance</CardTitle>
+                  <CardDescription className="text-[10px]">
+                    {ledgerReport.range.from} → {ledgerReport.range.to}
+                  </CardDescription>
+                  <CardAction className="self-center">
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] ${
+                        Math.round(ledgerReport.trialBalance.totalDebit * 100) ===
+                        Math.round(ledgerReport.trialBalance.totalCredit * 100)
+                          ? 'text-emerald-600 border-emerald-500/30'
+                          : 'text-red-600 border-red-500/30'
+                      }`}
+                    >
+                      {Math.round(ledgerReport.trialBalance.totalDebit * 100) ===
+                      Math.round(ledgerReport.trialBalance.totalCredit * 100)
+                        ? 'Balanced'
+                        : 'Out of balance'}
+                    </Badge>
+                  </CardAction>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="text-xs">
+                        <TableHead>Code</TableHead>
+                        <TableHead>Account</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="text-right">Debit</TableHead>
+                        <TableHead className="text-right">Credit</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {ledgerReport.trialBalance.rows.map((row: any) => (
+                        <TableRow key={row.code} className="text-xs">
+                          <TableCell className="font-mono">{row.code}</TableCell>
+                          <TableCell>{row.name}</TableCell>
+                          <TableCell className="capitalize text-muted-foreground">{row.type}</TableCell>
+                          <TableCell className="text-right">{row.debit ? formatMoney(row.debit) : '—'}</TableCell>
+                          <TableCell className="text-right">{row.credit ? formatMoney(row.credit) : '—'}</TableCell>
+                        </TableRow>
+                      ))}
+                      {ledgerReport.trialBalance.rows.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-10 text-xs text-muted-foreground">
+                            No journal activity in this period. Post receipts or widen the date range.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      <TableRow className="text-xs font-bold bg-muted/40">
+                        <TableCell colSpan={3}>Total</TableCell>
+                        <TableCell className="text-right">{formatMoney(ledgerReport.trialBalance.totalDebit)}</TableCell>
+                        <TableCell className="text-right">{formatMoney(ledgerReport.trialBalance.totalCredit)}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
+
+            {ledgerView === 'pnl' && ledgerReport && (
+              <div className="grid gap-3 lg:grid-cols-2">
+                <Card className="border-border shadow-xs">
+                  <CardHeader className="py-3 px-4">
+                    <CardTitle className="text-xs font-semibold">Income</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableBody>
+                        {ledgerReport.profitAndLoss.income.map((row: any) => (
+                          <TableRow key={row.code} className="text-xs">
+                            <TableCell className="font-mono w-[70px]">{row.code}</TableCell>
+                            <TableCell>{row.name}</TableCell>
+                            <TableCell className="text-right">{formatMoney(row.amount)}</TableCell>
+                          </TableRow>
+                        ))}
+                        {ledgerReport.profitAndLoss.income.length === 0 && (
+                          <TableRow>
+                            <TableCell className="text-center py-6 text-xs text-muted-foreground">
+                              No income posted
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        <TableRow className="text-xs font-bold bg-muted/40">
+                          <TableCell colSpan={2}>Total income</TableCell>
+                          <TableCell className="text-right">
+                            {formatMoney(ledgerReport.profitAndLoss.totalIncome)}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+                <Card className="border-border shadow-xs">
+                  <CardHeader className="py-3 px-4">
+                    <CardTitle className="text-xs font-semibold">Expenses</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableBody>
+                        {ledgerReport.profitAndLoss.expenses.map((row: any) => (
+                          <TableRow key={row.code} className="text-xs">
+                            <TableCell className="font-mono w-[70px]">{row.code}</TableCell>
+                            <TableCell>{row.name}</TableCell>
+                            <TableCell className="text-right">{formatMoney(row.amount)}</TableCell>
+                          </TableRow>
+                        ))}
+                        {ledgerReport.profitAndLoss.expenses.length === 0 && (
+                          <TableRow>
+                            <TableCell className="text-center py-6 text-xs text-muted-foreground">
+                              No expenses posted
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        <TableRow className="text-xs font-bold bg-muted/40">
+                          <TableCell colSpan={2}>Total expenses</TableCell>
+                          <TableCell className="text-right">
+                            {formatMoney(ledgerReport.profitAndLoss.totalExpenses)}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+                <Card className="border-border shadow-xs lg:col-span-2">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <span className="text-sm font-semibold">Net profit / (loss)</span>
+                    <span
+                      className={`text-lg font-bold ${
+                        ledgerReport.profitAndLoss.netProfit < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600'
+                      }`}
+                    >
+                      {formatMoney(ledgerReport.profitAndLoss.netProfit)} ETB
+                    </span>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {ledgerView === 'bs' && ledgerReport && (
+              <div className="grid gap-3 lg:grid-cols-3">
+                {[
+                  { title: 'Assets', rows: ledgerReport.balanceSheet.assets, total: ledgerReport.balanceSheet.totalAssets },
+                  {
+                    title: 'Liabilities',
+                    rows: ledgerReport.balanceSheet.liabilities,
+                    total: ledgerReport.balanceSheet.totalLiabilities,
+                  },
+                  { title: 'Equity', rows: ledgerReport.balanceSheet.equity, total: ledgerReport.balanceSheet.totalEquity },
+                ].map((section) => (
+                  <Card key={section.title} className="border-border shadow-xs">
+                    <CardHeader className="py-3 px-4">
+                      <CardTitle className="text-xs font-semibold">{section.title}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableBody>
+                          {section.rows.map((row: any) => (
+                            <TableRow key={row.code} className="text-xs">
+                              <TableCell className="font-mono w-[60px]">{row.code}</TableCell>
+                              <TableCell>{row.name}</TableCell>
+                              <TableCell className="text-right">{formatMoney(row.amount)}</TableCell>
+                            </TableRow>
+                          ))}
+                          {section.title === 'Equity' && (
+                            <TableRow className="text-xs">
+                              <TableCell className="font-mono w-[60px]">—</TableCell>
+                              <TableCell>Retained earnings (period)</TableCell>
+                              <TableCell className="text-right">
+                                {formatMoney(ledgerReport.balanceSheet.retainedEarnings)}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {section.rows.length === 0 && section.title !== 'Equity' && (
+                            <TableRow>
+                              <TableCell className="text-center py-6 text-xs text-muted-foreground">None</TableCell>
+                            </TableRow>
+                          )}
+                          <TableRow className="text-xs font-bold bg-muted/40">
+                            <TableCell colSpan={2}>Total {section.title.toLowerCase()}</TableCell>
+                            <TableCell className="text-right">{formatMoney(section.total)}</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                ))}
+                <Card className="border-border shadow-xs lg:col-span-3">
+                  <CardContent className="p-4 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-muted-foreground">
+                      Assets {formatMoney(ledgerReport.balanceSheet.totalAssets)} · Liabilities + Equity{' '}
+                      {formatMoney(
+                        ledgerReport.balanceSheet.totalLiabilities +
+                          ledgerReport.balanceSheet.totalEquity +
+                          ledgerReport.balanceSheet.retainedEarnings
+                      )}{' '}
+                      ETB
+                    </span>
+                    <span className="text-muted-foreground">
+                      Difference:{' '}
+                      <strong className="text-foreground">
+                        {formatMoney(
+                          ledgerReport.balanceSheet.totalAssets -
+                            (ledgerReport.balanceSheet.totalLiabilities +
+                              ledgerReport.balanceSheet.totalEquity +
+                              ledgerReport.balanceSheet.retainedEarnings)
+                        )}{' '}
+                        ETB
+                      </strong>
+                    </span>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {ledgerView === 'tax' && ledgerReport && (
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    { label: 'Output VAT (sales)', value: ledgerReport.vatReturn.outputVat },
+                    { label: 'Input VAT (purchases)', value: ledgerReport.vatReturn.inputVat },
+                    { label: 'Turnover tax (2%)', value: ledgerReport.vatReturn.turnoverTax },
+                    { label: 'Net VAT payable', value: ledgerReport.vatReturn.netPayable },
+                  ].map((item) => (
+                    <Card key={item.label} className="border-border shadow-xs">
+                      <CardContent className="p-4">
+                        <div className="text-[11px] text-muted-foreground">{item.label}</div>
+                        <div className="text-lg font-bold mt-1">{formatMoney(item.value)} ETB</div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+                <Card className="border-border shadow-xs">
+                  <CardHeader className="py-3 px-4">
+                    <CardTitle className="text-xs font-semibold">Withholding tax schedule (purchases)</CardTitle>
+                    <CardDescription className="text-[10px]">
+                      2% goods, 3% services — withheld from vendor payments in this period
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="text-xs">
+                          <TableHead>Date</TableHead>
+                          <TableHead>FS Number</TableHead>
+                          <TableHead>Vendor</TableHead>
+                          <TableHead>TIN</TableHead>
+                          <TableHead className="text-right">Untaxed</TableHead>
+                          <TableHead className="text-right">Rate</TableHead>
+                          <TableHead className="text-right">WHT</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {ledgerReport.whtSchedule.map((row: any, idx: number) => (
+                          <TableRow key={`${row.fs_number}-${idx}`} className="text-xs">
+                            <TableCell className="text-muted-foreground">{row.date || '—'}</TableCell>
+                            <TableCell className="font-mono">{row.fs_number || '—'}</TableCell>
+                            <TableCell>{row.partner_name || '—'}</TableCell>
+                            <TableCell className="font-mono text-muted-foreground">{row.partner_tin || '—'}</TableCell>
+                            <TableCell className="text-right">{formatMoney(row.untaxed_amount)}</TableCell>
+                            <TableCell className="text-right">{row.wht_rate ? `${row.wht_rate}%` : '—'}</TableCell>
+                            <TableCell className="text-right font-medium">{formatMoney(row.wht_amount)}</TableCell>
+                          </TableRow>
+                        ))}
+                        {ledgerReport.whtSchedule.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center py-8 text-xs text-muted-foreground">
+                              No withholding tax recorded in this period.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {ledgerView === 'journal' && ledgerReport && (
+              <div className="space-y-2">
+                {ledgerReport.journal.slice(0, 100).map((entry: any) => (
+                  <Card key={entry.id} className="border-border shadow-xs">
+                    <CardContent className="p-0">
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-border bg-muted/30">
+                        <div className="text-xs">
+                          <span className="font-mono text-muted-foreground mr-2">{entry.date}</span>
+                          <span className="font-semibold">{entry.reference || entry.source}</span>
+                          <span className="text-muted-foreground ml-2">{entry.description}</span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground">
+                          Dr {formatMoney(entry.totalDebit)} · Cr {formatMoney(entry.totalCredit)}
+                        </span>
+                      </div>
+                      <Table>
+                        <TableBody>
+                          {entry.lines.map((line: any, idx: number) => (
+                            <TableRow key={idx} className="text-[11px]">
+                              <TableCell className="w-[220px] font-medium">{line.account}</TableCell>
+                              <TableCell className="text-muted-foreground">{line.description}</TableCell>
+                              <TableCell className="text-right w-[110px]">
+                                {line.debit ? formatMoney(line.debit) : ''}
+                              </TableCell>
+                              <TableCell className="text-right w-[110px]">
+                                {line.credit ? formatMoney(line.credit) : ''}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                ))}
+                {ledgerReport.journal.length === 0 && (
+                  <Card className="border-border shadow-xs">
+                    <CardContent className="py-10 text-center text-xs text-muted-foreground">
+                      No journal entries in this period.
+                    </CardContent>
+                  </Card>
+                )}
+                {ledgerReport.journal.length > 100 && (
+                  <p className="text-[10px] text-muted-foreground text-center">
+                    Showing the 100 most recent entries of {ledgerReport.journal.length}. Narrow the date range for the
+                    rest.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -2317,10 +3633,62 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                   onChange={(e) => setReceiptWhtRate(Number(e.target.value))}
                   className="w-full text-xs h-9 rounded-md border border-border bg-background px-3"
                 >
-                  <option value={3}>3% (Goods &gt; 20,000 ETB)</option>
-                  <option value={2}>2% (Services &gt; 3,000 ETB)</option>
-                  <option value={0}>0% (Exempt)</option>
+                  <option value={2}>2% (Goods)</option>
+                  <option value={3}>3% (Services)</option>
+                  <option value={0}>0% (Not withheld)</option>
                 </select>
+                <p className="text-[10px] text-muted-foreground">
+                  Recommended by supply type: {supplyType === 'services' ? '3%' : supplyType === 'goods' ? '2%' : '—'}
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="vat-amount" className="text-xs">VAT Amount on Document (ETB)</Label>
+                <Input
+                  id="vat-amount"
+                  type="number"
+                  value={extractedVat ?? ''}
+                  onChange={(e) => setExtractedVat(e.target.value ? Number(e.target.value) : null)}
+                  placeholder="Read from the printed receipt"
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="supply-type" className="text-xs">Supply Type</Label>
+                <select
+                  id="supply-type"
+                  value={supplyType}
+                  onChange={(e) => setSupplyType(e.target.value as any)}
+                  className="w-full text-xs h-9 rounded-md border border-border bg-background px-3"
+                >
+                  <option value="goods">Goods</option>
+                  <option value="services">Services</option>
+                  <option value="mixed">Mixed</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="vat-treatment" className="text-xs">VAT Treatment</Label>
+                <select
+                  id="vat-treatment"
+                  value={vatTreatment}
+                  onChange={(e) => setVatTreatment(e.target.value as any)}
+                  className="w-full text-xs h-9 rounded-md border border-border bg-background px-3"
+                >
+                  <option value="standard">Standard rated (15%)</option>
+                  <option value="zero_rated">Zero rated (0%)</option>
+                  <option value="exempt">Exempt</option>
+                  <option value="tot">TOT only (2%)</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+                {ocrCalendar === 'ethiopian' && (
+                  <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <CalendarDays className="w-3 h-3" />
+                    Ethiopian calendar date converted to Gregorian ({receiptDate || '—'})
+                  </p>
+                )}
               </div>
             </div>
 
@@ -2331,18 +3699,59 @@ export default function UserDashboard({ user, onLogout }: UserDashboardProps) {
                 <span>{safeUntaxed.toLocaleString()} ETB</span>
               </div>
               <div className="flex justify-between text-blue-600 dark:text-blue-400">
-                <span>Value Added Tax (15%):</span>
-                <span>+{calculatedVat.toLocaleString()} ETB</span>
+                <span>
+                  VAT ({vatTreatment === 'standard' ? '15%' : vatTreatment === 'tot' ? 'TOT 2%' : 'not applicable'}):
+                </span>
+                <span>+{(vatTreatment === 'tot' ? totIncluded : effectiveVat).toLocaleString()} ETB</span>
               </div>
               <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
                 <span>Withholding Tax ({receiptWhtRate}%):</span>
                 <span>-{calculatedWht.toLocaleString()} ETB</span>
               </div>
               <div className="border-t border-border pt-1.5 flex justify-between font-bold text-foreground">
-                <span>Total Calculated Receipt:</span>
+                <span>Total on Receipt:</span>
                 <span>{calculatedTotal.toLocaleString()} ETB</span>
               </div>
+              {extractedTotal != null && Math.abs(extractedTotal - (safeUntaxed + effectiveVat + totIncluded)) > 1 && (
+                <div className="text-[10px] text-amber-600 dark:text-amber-400 flex items-start gap-1">
+                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>
+                    Receipt total ({extractedTotal.toLocaleString()} ETB) differs from untaxed + VAT items. Verify the
+                    line items before posting.
+                  </span>
+                </div>
+              )}
             </div>
+
+            {extractedLines.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-[11px] font-semibold text-muted-foreground">
+                  Extracted line items ({extractedLines.length})
+                </div>
+                <div className="max-h-40 overflow-y-auto border border-border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="text-[10px]">
+                        <TableHead>Description</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Unit Price</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {extractedLines.map((line, idx) => (
+                        <TableRow key={idx} className="text-[11px]">
+                          <TableCell className="py-1.5">{line.description}</TableCell>
+                          <TableCell className="py-1.5 text-right">{line.quantity ?? '—'}</TableCell>
+                          <TableCell className="py-1.5 text-right">{formatMoney(line.unit_price)}</TableCell>
+                          <TableCell className="py-1.5 text-right font-medium">{formatMoney(line.amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
 
             {/* Live OCR Raw Output + Confidence Notes */}
             {rawOcrText && (

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requirePlatformAdmin } from "@/lib/auth"
 import { createAdminSupabase } from "@/lib/supabase/admin"
 import { extractStoragePath } from "@/lib/documents"
+import { fetchLicensesForCompany, fetchAllLicenses, addLicenseForCompany } from "@/lib/licenses"
 
 export const dynamic = "force-dynamic"
 
@@ -15,24 +16,14 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
 
   try {
-    let query = admin
-      .from("company_licenses")
-      .select("id, company_id, license_name, license_number, license_type, is_primary, created_at")
-      .order("is_primary", { ascending: false })
-      .order("created_at", { ascending: true })
-
     if (companyId) {
-      query = query.eq("company_id", companyId)
+      const licenses = await fetchLicensesForCompany(admin, companyId)
+      return NextResponse.json({ licenses })
     }
 
-    const { data, error } = await query
-
-    if (error || !data) {
-      return NextResponse.json({ licenses: [] })
-    }
-
-    return NextResponse.json({ licenses: data })
-  } catch {
+    const all = await fetchAllLicenses(admin)
+    return NextResponse.json({ licenses: all })
+  } catch (err: any) {
     return NextResponse.json({ licenses: [] })
   }
 }
@@ -50,6 +41,9 @@ export async function POST(req: NextRequest) {
       license_name,
       license_number,
       license_type,
+      company_type,
+      branch_region,
+      branch_office,
       documents, // array of { type, path, fileName }
     } = body
 
@@ -60,27 +54,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    let createdLicenseId: string | null = null
+    const createdLicense = await addLicenseForCompany(admin, company_id, {
+      license_name,
+      license_number,
+      license_type,
+      company_type,
+      branch_region,
+      branch_office,
+      is_primary: false,
+    })
 
-    try {
-      const { data: lic, error: licErr } = await admin
-        .from("company_licenses")
-        .insert({
-          company_id,
-          license_name,
-          license_number: license_number || null,
-          license_type: license_type || "Business License",
-          is_primary: false,
-        })
-        .select("id, license_name, license_number, license_type, is_primary")
-        .single()
-
-      if (!licErr && lic) {
-        createdLicenseId = lic.id
-      }
-    } catch {
-      // company_licenses table might not exist
-    }
+    const createdLicenseId = createdLicense.id
 
     // Process attached documents
     if (Array.isArray(documents) && documents.length > 0) {
@@ -117,6 +101,7 @@ export async function POST(req: NextRequest) {
       {
         message: "License created successfully",
         licenseId: createdLicenseId,
+        license: createdLicense,
       },
       { status: 201 }
     )

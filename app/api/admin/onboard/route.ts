@@ -3,6 +3,8 @@ import { requirePlatformAdmin } from "@/lib/auth"
 import { createAdminSupabase } from "@/lib/supabase/admin"
 import { generatePassword } from "@/lib/credentials"
 import { extractStoragePath } from "@/lib/documents"
+import { randomUUID } from "crypto"
+import { StoredLicense } from "@/lib/licenses"
 
 export const dynamic = "force-dynamic"
 
@@ -156,41 +158,70 @@ export async function POST(req: Request) {
 
     // Process Licenses
     const createdLicenseIds: Record<string, string> = {}
+    const storedLicenses: StoredLicense[] = []
     if (licenses.length > 0) {
       for (let i = 0; i < licenses.length; i++) {
         const lic = licenses[i]
+        const licId = randomUUID()
+        const licObj: StoredLicense = {
+          id: licId,
+          company_id: companyId,
+          license_name: lic.licenseName || (i === 0 ? "Main License" : `License ${i + 1}`),
+          license_number: lic.licenseNumber || null,
+          license_type: lic.licenseType || "Business License",
+          company_type: lic.companyType || companyType,
+          branch_region: lic.branchRegion || branchRegion,
+          branch_office: lic.branchOffice || branchOffice,
+          is_primary: lic.isPrimary ?? i === 0,
+          created_at: new Date().toISOString(),
+        }
+        storedLicenses.push(licObj)
+        createdLicenseIds[`license_${i}`] = licId
+
         try {
-          const { data: licData } = await admin
-            .from("company_licenses")
-            .insert({
-              company_id: companyId,
-              license_name: lic.licenseName || (i === 0 ? "Main License" : `License ${i + 1}`),
-              license_number: lic.licenseNumber || null,
-              license_type: lic.licenseType || "Business License",
-              is_primary: lic.isPrimary ?? i === 0,
-            })
-            .select("id")
-            .single()
-          if (licData?.id) {
-            createdLicenseIds[`license_${i}`] = licData.id
-          }
+          await admin.from("company_licenses").insert({
+            id: licId,
+            company_id: companyId,
+            license_name: licObj.license_name,
+            license_number: licObj.license_number,
+            license_type: licObj.license_type,
+            is_primary: licObj.is_primary,
+          })
         } catch {
           // company_licenses table might not exist
         }
       }
     } else {
-      // Default primary license
+      const mainLicId = companyId
+      const licObj: StoredLicense = {
+        id: mainLicId,
+        company_id: companyId,
+        license_name: "Main License",
+        license_number: null,
+        license_type: "Business License",
+        is_primary: true,
+        created_at: new Date().toISOString(),
+      }
+      storedLicenses.push(licObj)
       try {
         await admin.from("company_licenses").insert({
+          id: mainLicId,
           company_id: companyId,
           license_name: "Main License",
           license_number: null,
           license_type: "Business License",
           is_primary: true,
         })
-      } catch {
-        // silent
-      }
+      } catch {}
+    }
+
+    // Persist licenses into companies.notes
+    try {
+      await admin.from("companies").update({
+        notes: JSON.stringify({ licenses: storedLicenses }),
+      }).eq("id", companyId)
+    } catch (e) {
+      console.error("Failed to save licenses in company notes:", e)
     }
 
     // Combine flat documents and license documents

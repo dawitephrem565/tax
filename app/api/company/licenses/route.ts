@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { authenticate, getMemberships } from "@/lib/auth"
 import { createAdminSupabase } from "@/lib/supabase/admin"
+import { fetchLicensesForCompany } from "@/lib/licenses"
 
 export const dynamic = "force-dynamic"
 
@@ -17,37 +18,19 @@ export async function GET(req: Request) {
   const admin = createAdminSupabase()
 
   try {
-    const { data, error } = await admin
-      .from("company_licenses")
-      .select("id, license_name, license_number, license_type, is_primary, created_at")
-      .eq("company_id", companyId)
-      .order("is_primary", { ascending: false })
-      .order("created_at", { ascending: true })
-
-    if (error || !data || data.length === 0) {
-      return NextResponse.json({
-        licenses: [
-          {
-            id: companyId,
-            license_name: "Main License",
-            license_number: null,
-            license_type: "Business License",
-            is_primary: true,
-          },
-        ],
-      })
-    }
-
-    return NextResponse.json({ licenses: data })
-  } catch {
+    const licenses = await fetchLicensesForCompany(admin, companyId as string)
+    return NextResponse.json({ licenses })
+  } catch (err: any) {
     return NextResponse.json({
       licenses: [
         {
-          id: companyId,
+          id: companyId || "main",
+          company_id: companyId || "main",
           license_name: "Main License",
           license_number: null,
           license_type: "Business License",
           is_primary: true,
+          created_at: new Date().toISOString(),
         },
       ],
     })

@@ -63,14 +63,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar
-        currentPage={currentPage}
-        onNavigate={handleNavigation}
-        isLoggedIn={authState === 'loggedIn'}
-        onLogout={handleLogout}
-      />
-      <main className="pt-16">
-        {currentPage === 'home' && <HomePage onNavigate={handleNavigation} />}
+      {currentPage !== 'home' && (
+        <Navbar
+          currentPage={currentPage}
+          onNavigate={handleNavigation}
+          isLoggedIn={authState === 'loggedIn'}
+          onLogout={handleLogout}
+        />
+      )}
+      <main className={currentPage === 'home' ? '' : 'pt-16'}>
+        {currentPage === 'home' && (
+          <HomePage
+            onNavigate={handleNavigation}
+            isLoggedIn={authState === 'loggedIn'}
+            userName={userData?.fullName}
+            onLogout={handleLogout}
+          />
+        )}
         {currentPage === 'findInfo' && (
           <FindInformationWizard onBack={() => setCurrentPage('home')} />
         )}
